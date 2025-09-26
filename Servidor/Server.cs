@@ -4,6 +4,7 @@ using System.Net;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Common;
+using Dominio;
 using Server.Dominio;
 
 namespace Server
@@ -17,6 +18,7 @@ namespace Server
         static readonly SettingsManager settingsMgr = new SettingsManager();
         static List<Usuario> users = new List<Usuario>;
         static readonly object usersLock = new object();
+        static List<Clase> clases = new List<Clase>();
 
         static void main(String[] args)
         {
@@ -144,7 +146,8 @@ namespace Server
             networkDataHelper.Send(response);
         }
 
-        static void HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData) {
+        static void HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
+        {
             string dataString = Encoding.UTF8.GetString(commandData);
             string[] classData = dataString.Split('|');
             string className = classData[0];
@@ -152,8 +155,20 @@ namespace Server
             int duration = int.Parse(classData[2]);
             int quota = int.Parse(classData[3]);
             string username = classData[4];
-            Usuario owner = usuarios.FirstOrDefault(u => string.Equals(username, u.nombre));
-            Clase newClass = new Clase(className, description, duration, quota, owner);
 
+            bool created = false;
+
+            Usuario owner = usuarios.FirstOrDefault(u => string.Equals(username, u.nombre));
+
+            lock (usersLock)
+            {
+                if (!clases.Any(c => string.Equals(c.Nombre, className)))
+                {
+
+                    Clase newClass = new Clase(className, description, duration, quota, owner);
+                }
+
+            }
         }
+    }
 
