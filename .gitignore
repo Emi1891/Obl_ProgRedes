@@ -1,0 +1,7 @@
+# Visual Studio cache/options directory
+.vs/
+# Visual Studio user-specific files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
