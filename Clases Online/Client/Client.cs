@@ -16,15 +16,15 @@ public class Client
 
     static void StartingMenu()
     {
-        Console.WriteLine("Welcome to the Client Application");
-        Console.WriteLine("Please choose an option:");
+        Console.WriteLine("\nWelcome to the Client Application");
         Console.WriteLine("1. Register");
         Console.WriteLine("2. Login");
         Console.WriteLine("3. Exit");
+        Console.Write("Choose an option: ");
     }
     static void PrintMenu()
     {
-        Console.WriteLine("Menu:");
+        Console.WriteLine("\nMenu:");
         Console.WriteLine("1. Create Class");
         Console.WriteLine("2. Join Class");
         Console.WriteLine("3. List Classes");
@@ -55,13 +55,13 @@ public class Client
         }
         catch (Exception e)
         {
-            Console.WriteLine("Could not connect to server: shutting down client...");
+            Console.WriteLine("\nCould not connect to server: shutting down client...");
             Thread.Sleep(2000);
             return;
 
         }
 
-        Console.WriteLine("Connected to server");
+        Console.WriteLine("\nConnected to server");
 
         bool running = true;
         NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
@@ -84,7 +84,7 @@ public class Client
                 catch (Exception e)
                 {
 
-                    Console.WriteLine("Invalid option. Please try again.");
+                    Console.WriteLine("\nInvalid option. Please try again.");
                     continue;
                 }
 
@@ -119,7 +119,7 @@ public class Client
                         running = LogIn(networkDataHelper);
                         break;
                     default:
-                        Console.WriteLine("Invalid option.");
+                        Console.WriteLine("\nInvalid option.");
                         break;
 
                 }
@@ -140,7 +140,7 @@ public class Client
                 catch (Exception e)
                 {
 
-                    Console.WriteLine("Invalid option. Please try again.");
+                    Console.WriteLine("\nInvalid option. Please try again.");
                     continue;
                 }
 
@@ -197,7 +197,7 @@ public class Client
             }
             
         }
-        Console.WriteLine("Conection interrupted...");
+        Console.WriteLine("\nConection interrupted...");
         clientSocket.Shutdown(SocketShutdown.Both);
         clientSocket.Close();
     }
@@ -234,11 +234,11 @@ public class Client
             string classesString = Encoding.UTF8.GetString(classesBytes);
             if (classesString == "")
             {
-                Console.WriteLine("No classes available.");
+                Console.WriteLine("\nNo classes available.");
                 return true;
             }
             string[] classes = classesString.Split('|');
-            Console.WriteLine("Available classes:");
+            Console.WriteLine("\nAvailable classes:");
             foreach (string classInfo in classes)
             {
                 string[] classDetails = classInfo.Split(',');
@@ -248,7 +248,7 @@ public class Client
         }
         catch (SocketException e)
         {
-            Console.WriteLine("Connection lost to server.");
+            Console.WriteLine("\nConnection lost to server.");
             return false;
         }
     }
@@ -256,18 +256,18 @@ public class Client
 
     internal static bool Register(NetworkDataHelper networkDataHelpe)
     {
-        Console.Write("Enter username: ");
+        Console.Write("\nEnter username: ");
         string? userName = Console.ReadLine();
         if (userName == "")
         {
-            Console.WriteLine("Username can't be null.");
+            Console.WriteLine("\nUsername can't be null.");
             return true;
         }
         Console.Write("Enter password: ");
         string? password = Console.ReadLine();
         if (password == "")
         {
-            Console.WriteLine("Password can't be null.");
+            Console.WriteLine("\nPassword can't be null.");
             return true;
         }
 
@@ -286,36 +286,36 @@ public class Client
 
             if (loggedIn)
             {
-                Console.WriteLine("Registered successfully.");
+                Console.WriteLine("\nRegistered successfully.");
             }
             else
             {
-                Console.WriteLine("Register failed, that username already exists");
+                Console.WriteLine("\nRegister failed, that username already exists");
             }
             return true;
 
         }
         catch (SocketException e)
         {
-            Console.WriteLine("Connection lost to server.");
+            Console.WriteLine("\nConnection lost to server.");
             return false;
         }
     }
 
     internal static bool LogIn(NetworkDataHelper networkDataHelper)
     {
-        Console.Write("Enter username: ");
+        Console.Write("\nEnter username: ");
         string? userName = Console.ReadLine();
         if (userName == null)
         {
-            Console.WriteLine("Username can't be null.");
+            Console.WriteLine("\nUsername can't be null.");
             return true;
         }
         Console.Write("Enter password: ");
         string? password = Console.ReadLine();
         if (password == null)
         {
-            Console.WriteLine("Password can't be null.");
+            Console.WriteLine("\nPassword can't be null.");
             return true;
         }
         string userAndPass = userName + "|" + password;
@@ -330,13 +330,13 @@ public class Client
             bool loggedIn = BitConverter.ToBoolean(result);
             if (loggedIn)
             {
-                Console.WriteLine("Logged in successfully.");
+                Console.WriteLine("\nLogged in successfully.");
                 Client.loggedIn = true;
                 userLogged = userName;
             }
             else
             {
-                Console.WriteLine("Login failed, incorrect username or password.");
+                Console.WriteLine("\nLogin failed, incorrect username or password.");
                 return true;
 
             }
@@ -345,7 +345,7 @@ public class Client
         }
         catch (SocketException e)
         {
-            Console.WriteLine("Connection lost to server.");
+            Console.WriteLine("\nConnection lost to server.");
             return false;
         }
 
@@ -359,11 +359,11 @@ public class Client
 
     public static bool CreateClass(NetworkDataHelper networkDataHelper)
     {
-        Console.Write("Enter class name: ");
+        Console.Write("\nEnter class name: ");
         string? className = Console.ReadLine();
         if (className == "")
         {
-            Console.WriteLine("Class name can't be null.");
+            Console.WriteLine("\nClass name can't be null.");
             return true;
         }
 
@@ -371,15 +371,7 @@ public class Client
         string? classDescription = Console.ReadLine();
         if (classDescription == "")
         {
-            Console.WriteLine("Class description can't be null.");
-            return true;
-        }
-        
-        Console.Write("Enter class duration (in minutes): ");
-        string? classDuration = Console.ReadLine();
-        if (classDuration == "")
-        {
-            Console.WriteLine("class duration cannot be null");
+            Console.WriteLine("\nClass description can't be null.");
             return true;
         }
 
@@ -387,7 +379,39 @@ public class Client
         string? classuQotas = Console.ReadLine();
         if (classuQotas == "")
         {
-            Console.WriteLine("Class quotas cannot be null");
+            Console.WriteLine("\nClass quotas cannot be null");
+            return true;
+        }
+
+        Console.Write("Enter class start date (DD/MM/YYYY) \nIf left blank, default date (today) will be applied: ");
+        string? classStartDate = Console.ReadLine();
+        if (classStartDate == "")
+        {
+            classStartDate = DateTime.Now.ToString("dd/MM/yyyy");
+            Console.WriteLine("Default date applied: " + classStartDate);
+        } 
+        else
+        {
+            // Agregar validación de formato de fecha
+        }
+
+        Console.Write("Enter class start time (HH:MM): ");
+        string? classStartTime = Console.ReadLine();
+        if (classStartTime == "")
+        {
+            Console.WriteLine("\nClass start time cannot be null");
+            return true;
+        }
+        else
+        {
+            // Agregar validación de formato de hora
+        }
+
+        Console.Write("Enter class duration (in minutes): ");
+        string? classDuration = Console.ReadLine();
+        if (classDuration == "")
+        {
+            Console.WriteLine("\nClass duration cannot be null");
             return true;
         }
 
@@ -395,15 +419,11 @@ public class Client
         string? hasCoverImage = Console.ReadLine();
         if (hasCoverImage == "" || (hasCoverImage != "y" && hasCoverImage != "n"))
         {
-            Console.WriteLine("Invalid input. Enter 'y' or 'n'.");
+            Console.WriteLine("\nInvalid input. Enter 'y' or 'n'.");
             return true;
         }
-        if (hasCoverImage == "y")
-        {
-            // TODO
-        }
 
-        string ClassData = className + "|" + classDescription + "|" + classDuration + "|" + classuQotas + "|" + userLogged;
+        string ClassData = className + "|" + classDescription + "|" + classuQotas + "|" + classStartDate + "|" + classStartTime + "|" + classDuration + "|" + hasCoverImage + "|" + userLogged;
         byte[] commandData = Encoding.UTF8.GetBytes(ClassData);
         int commandLength = commandData.Length;
         byte[] commandDataLenght = BitConverter.GetBytes(commandLength);
@@ -411,22 +431,73 @@ public class Client
         {
             networkDataHelper.Send(commandDataLenght);
             networkDataHelper.Send(commandData);
+
+            if (hasCoverImage == "y")
+            {
+                Console.Write("Type the image path: ");
+                string? filePath = Console.ReadLine();
+
+                FileInfo fileInfo = new FileInfo(filePath);
+
+                string fileName = fileInfo.Name;
+                byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+
+                int fileNameLength = fileNameBytes.Length;
+                byte[] fileNameLengthBytes = BitConverter.GetBytes(fileNameLength);
+
+                long fileSize = fileInfo.Length;
+                byte[] fileSizeBytes = BitConverter.GetBytes(fileSize);
+
+                networkDataHelper.Send(fileNameLengthBytes);
+                networkDataHelper.Send(fileNameBytes);
+                networkDataHelper.Send(fileSizeBytes);
+
+                long offset = 0;
+                long partCount = Protocol.CalculateFileParts(fileSize);
+                long currentPart = 1;
+
+                FileStreamHelper fileStreamHelper = new FileStreamHelper();
+
+                while (offset < fileSize)
+                {
+                    byte[] buffer;
+                    bool isLastPart = currentPart == partCount;
+
+                    if (!isLastPart)
+                    {
+                        Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                        buffer = fileStreamHelper.Read(filePath, offset, Protocol.MaxFileChunkSize);
+                        offset += Protocol.MaxFileChunkSize;
+                    }
+                    else
+                    {
+                        long lastPartSize = fileSize - offset;
+                        Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                        buffer = fileStreamHelper.Read(filePath, offset, (int)lastPartSize);
+                        offset += lastPartSize;
+                    }
+                    networkDataHelper.Send(buffer);
+                    currentPart++;
+                }
+            }
+
             byte[] result = networkDataHelper.Receive(1);
             bool classCreated = BitConverter.ToBoolean(result);
+
             if (classCreated)
             {
-                Console.WriteLine("Class created successfully.");
+                Console.WriteLine("\nClass created successfully.");
             }
             else
             {
-                Console.WriteLine("Class creation failed, try again.");
+                Console.WriteLine("\nClass creation failed, try again.");
             }
             return true;
 
         }
         catch (SocketException e)
         {
-            Console.WriteLine("Connection lost to server.");
+            Console.WriteLine("\nConnection lost to server.");
             return false;
         }
     }

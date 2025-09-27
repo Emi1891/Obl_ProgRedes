@@ -257,7 +257,7 @@ namespace Server
             return validUser;
         }
 
-        // Cliente envía: name|desc|quota|yyyy-MM-dd HH:mm|dur|user
+        // Cliente envía: name|desc|quota|yyyy-MM-dd|HH:mm|dur|hasImg|user
         static bool HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
@@ -270,10 +270,12 @@ namespace Server
 
             string name = p[0];
             string desc = p[1];
-            bool okQuota = int.TryParse(p[2], out int quota);
-            string dateTimeStr = p[3]; // por ahora no se usa; podés parsearlo si tu modelo lo soporta
-            bool okDur = int.TryParse(p[4], out int dur);
-            string user = p[5];
+            bool okQuota = int.TryParse(p[2], out int quota); // No entendi bien esta validacion. Capaz es mejor hacerla en el cliente
+            string startDate = p[3];
+            string startTime = p[4];
+            bool okDur = int.TryParse(p[5], out int dur);
+            string hasImg = p[6];
+            string user = p[7];
 
             if (!okQuota || !okDur)
             {
@@ -298,6 +300,62 @@ namespace Server
                 bool exists = clases.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
                 if (!exists)
                 {
+                    if (hasImg == "y")
+                    {
+                        try
+                        {
+                            byte[] fileNameLengthBuffer = dataHelper.Receive(Protocol.FileNameLenghtSize);
+                            int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
+
+                            byte[] fileNameBuffer = dataHelper.Receive(fileNameLength);
+                            string fileName = Encoding.UTF8.GetString(fileNameBuffer);
+
+                            byte[] fileSizeBuffer = dataHelper.Receive(Protocol.FileSizeLenghtSize);
+                            long fileSize = BitConverter.ToInt64(fileSizeBuffer);
+
+                            long offset = 0;
+                            long partCount = Protocol.CalculateFileParts(fileSize);
+                            long currentPart = 1;
+
+                            FileStreamHelper fileStreamHelper = new FileStreamHelper();
+
+                            while (offset < fileSize)
+                            {
+                                byte[] buffer;
+                                bool isLastPart = currentPart == partCount;
+
+                                if (!isLastPart)
+                                {
+                                    Console.WriteLine($"Receiving part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                                    buffer = dataHelper.Receive(Protocol.MaxFileChunkSize);
+                                    offset += Protocol.MaxFileChunkSize;
+                                }
+                                else
+                                {
+                                    long lastPartSize = fileSize - offset;
+                                    Console.WriteLine($"Receiving part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                                    buffer = dataHelper.Receive((int)lastPartSize);
+                                    offset += lastPartSize;
+                                }
+                                Directory.CreateDirectory("Images");
+                                fileStreamHelper.Write("Images/" + fileName, buffer);
+                                currentPart++;
+                            }
+
+                            Console.WriteLine($"File {fileName} received successfully.");
+                        }
+                        catch (SocketException e)
+                        {
+                            // Agregar manejo de error
+                            // Ejemplo de clase: clientActive = false;
+                            Console.WriteLine("SERVER CAYO EN SOCKET EXCEPTION: " + e.Message);
+                        }
+                        catch (Exception e)
+                        {
+                            // Agregar manejo de error
+                            Console.WriteLine("SERVER CAYO EN EXCEPTION: "+ e.Message);
+                        }
+                    }
                     var nueva = new Clase(name, desc, dur, quota, owner);
                     clases.Add(nueva);     // IMPORTANTE: agregar a la lista
                     created = true;

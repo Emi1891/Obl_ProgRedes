@@ -20,9 +20,7 @@ public class FileStreamHelper
                 int read = fs.Read(data, bytesRead, length - bytesRead);
                 if (read == 0)
                 {
-                    throw new Exception("File could not be read");
-
-
+                    throw new Exception("File could not be read.");
                 }
                 bytesRead += read;
             }
