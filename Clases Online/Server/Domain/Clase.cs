@@ -13,11 +13,19 @@ public class Clase
     public string Descripcion { get; set; }
     public int CuposMaximos { get; set; }
     public DateTime Fecha { get; set; }
-    public List<Usuario> usuarios { get; set; }
+    public List<Usuario> usuarios { get; set; } = new List<Usuario>();
     public string? urlFoto { get; set; }
     public int Duracion { get; set; }
     public Usuario owner { get; set; }
     public string link { get; set; }
+
+    public int CuposDisponibles 
+    { 
+        get
+        {
+            return CuposMaximos - usuarios.Count;
+        }
+    }
 
     public Clase(string _nombre, string _descripcion, int _duracion, int _cupos, Usuario _usuario)
     {

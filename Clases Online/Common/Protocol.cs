@@ -22,6 +22,15 @@ public enum Command
 {
     Register,
     Login,
+    Exit,
+}
+
+public enum CommandLogged
+{
     CreateClass,
+    JoinClass,
+    ListClasses,
+    LeaveClass,
+    History,
     Exit,
 }

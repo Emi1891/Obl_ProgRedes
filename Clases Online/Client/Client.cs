@@ -10,17 +10,27 @@ namespace Client;
 public class Client
 {
     public static string? userLogged;
-
+    public static bool loggedIn = false;
 
     static readonly SettingManager settingsMgr = new SettingManager();
 
+    static void StartingMenu()
+    {
+        Console.WriteLine("Welcome to the Client Application");
+        Console.WriteLine("Please choose an option:");
+        Console.WriteLine("1. Register");
+        Console.WriteLine("2. Login");
+        Console.WriteLine("3. Exit");
+    }
     static void PrintMenu()
     {
         Console.WriteLine("Menu:");
-        Console.WriteLine("1. Register");
-        Console.WriteLine("2. Login");
-        Console.WriteLine("3. Create Class");
-        Console.WriteLine("4. Exit");
+        Console.WriteLine("1. Create Class");
+        Console.WriteLine("2. Join Class");
+        Console.WriteLine("3. List Classes");
+        Console.WriteLine("4. Leave Class");
+        Console.WriteLine("5. History");
+        Console.WriteLine("6. Exit");
         Console.Write("Choose an option: ");
     }
 
@@ -59,81 +69,204 @@ public class Client
         while (running)
         {
 
-
-            PrintMenu();
-            string option = Console.ReadLine();
-            int commandNum = -1;
-
-            try
+            while (!loggedIn)
             {
+                StartingMenu();
+                string option = Console.ReadLine();
+                int commandNum = -1;
 
-                commandNum = int.Parse(option) - 1;
+                try
+                {
 
-            }
-            catch (Exception e)
-            {
+                    commandNum = int.Parse(option) - 1;
 
-                Console.WriteLine("Invalid option. Please try again.");
-                continue;
-            }
+                }
+                catch (Exception e)
+                {
 
-            Command command = (Command)commandNum;
-            if (command == Command.Exit) break;
+                    Console.WriteLine("Invalid option. Please try again.");
+                    continue;
+                }
 
-            byte[] messegeType = Encoding.UTF8.GetBytes(Protocol.request);
-            string commandString = ((int)command).ToString("D2");
-            byte[] commandBytes = Encoding.UTF8.GetBytes(commandString);
+                Command command = (Command)commandNum;
+                if (command == Command.Exit) break;
 
-            try
-            {
+                byte[] messegeType = Encoding.UTF8.GetBytes(Protocol.request);
+                string commandString = ((int)command).ToString("D2");
+                byte[] commandBytes = Encoding.UTF8.GetBytes(commandString);
 
-                networkDataHelper.Send(messegeType);
-                networkDataHelper.Send(commandBytes);
+                try
+                {
 
-            }
-            catch (SocketException e)
-            {
+                    networkDataHelper.Send(messegeType);
+                    networkDataHelper.Send(commandBytes);
 
-                running = false;
-                break;
+                }
+                catch (SocketException e)
+                {
 
-            }
-
-            switch (command)
-            {
-                case Command.Register:
-                    running = Register(networkDataHelper);
-                    break;
-                case Command.Login:
-                    running = LogIn(networkDataHelper);
-                    break;
-                case Command.CreateClass:
-                    running = CreateClass(networkDataHelper);
-                    break;
-                default:
-                    Console.WriteLine("Invalid option.");
+                    running = false;
                     break;
 
+                }
+
+                switch (command)
+                {
+                    case Command.Register:
+                        running = Register(networkDataHelper);
+                        break;
+                    case Command.Login:
+                        running = LogIn(networkDataHelper);
+                        break;
+                    default:
+                        Console.WriteLine("Invalid option.");
+                        break;
+
+                }
             }
+
+
+            while (loggedIn)
+            {
+                PrintMenu();
+                string option = Console.ReadLine();
+                int commandNum = -1;
+                try
+                {
+
+                    commandNum = int.Parse(option) - 1;
+
+                }
+                catch (Exception e)
+                {
+
+                    Console.WriteLine("Invalid option. Please try again.");
+                    continue;
+                }
+
+                CommandLogged command = (CommandLogged)commandNum;
+                if (command == CommandLogged.Exit) break;
+
+                byte[] messegeType = Encoding.UTF8.GetBytes(Protocol.request);
+                string commandString = ((int)command).ToString("D2");
+                byte[] commandBytes = Encoding.UTF8.GetBytes(commandString);
+
+                try
+                {
+
+                    networkDataHelper.Send(messegeType);
+                    networkDataHelper.Send(commandBytes);
+
+                }
+                catch (SocketException e)
+                {
+
+                    running = false;
+                    break;
+
+                }
+                switch (command)
+                {
+                    case CommandLogged.CreateClass:
+                        running = CreateClass(networkDataHelper);
+                        break;
+                    case CommandLogged.JoinClass:
+                        //running = JoinClass(networkDataHelper);
+                        Console.WriteLine("Not implemented yet.");
+                        break;
+                    case CommandLogged.ListClasses:
+                        running = ListClasses(networkDataHelper);
+                        Console.WriteLine("Not implemented yet.");
+                        break;
+                    case CommandLogged.LeaveClass:
+                        //running = LeaveClass(networkDataHelper);
+                        Console.WriteLine("Not implemented yet.");
+                        break;
+                    case CommandLogged.History:
+                        //running = History(networkDataHelper);
+                        Console.WriteLine("Not implemented yet.");
+                        break;
+                    case CommandLogged.Exit:
+                        running = logout(networkDataHelper);
+                        break;
+                    default:
+                        Console.WriteLine("Invalid option.");
+                        break;
+                }
+
+            }
+            
         }
         Console.WriteLine("Conection interrupted...");
         clientSocket.Shutdown(SocketShutdown.Both);
         clientSocket.Close();
-
     }
+    internal static bool logout(NetworkDataHelper networkDataHelper)
+    {
+        try
+        {
+            byte[] result = networkDataHelper.Receive(1);
+            bool loggedOut = BitConverter.ToBoolean(result);
+            if (loggedOut)
+            {
+                Console.WriteLine("Logged out successfully.");
+                Client.loggedIn = false;
+                userLogged = null;
+            }
+            else
+            {
+                Console.WriteLine("Logout failed, try again.");
+            }
+            return true;
+        }
+        catch (SocketException e)
+        {
+            Console.WriteLine("Connection lost to server.");
+            return false;
+        }
+    }
+    internal static bool ListClasses(NetworkDataHelper networkDataHelper)
+    {
+        try
+        {
+            byte[] classesLengthBytes = networkDataHelper.Receive(4);
+            int classesLength = BitConverter.ToInt32(classesLengthBytes);
+            byte[] classesBytes = networkDataHelper.Receive(classesLength);
+            string classesString = Encoding.UTF8.GetString(classesBytes);
+            if (classesString == "")
+            {
+                Console.WriteLine("No classes available.");
+                return true;
+            }
+            string[] classes = classesString.Split('|');
+            Console.WriteLine("Available classes:");
+            foreach (string classInfo in classes)
+            {
+                string[] classDetails = classInfo.Split(',');
+                Console.WriteLine($"Class Name: {classDetails[0]}, Description: {classDetails[1]}, Duration: {classDetails[2]} minutes, Quotas: {classDetails[3]}");
+            }
+            return true;
+        }
+        catch (SocketException e)
+        {
+            Console.WriteLine("Connection lost to server.");
+            return false;
+        }
+    }
+
 
     internal static bool Register(NetworkDataHelper networkDataHelpe)
     {
         Console.Write("Enter username: ");
         string? userName = Console.ReadLine();
-        if (userName == null)
+        if (userName == "")
         {
             Console.WriteLine("Username can't be null.");
             return true;
         }
         Console.Write("Enter password: ");
         string? password = Console.ReadLine();
-        if (password == null)
+        if (password == "")
         {
             Console.WriteLine("Password can't be null.");
             return true;
@@ -199,6 +332,7 @@ public class Client
             if (loggedIn)
             {
                 Console.WriteLine("Logged in successfully.");
+                Client.loggedIn = true;
                 userLogged = userName;
             }
             else
@@ -218,18 +352,24 @@ public class Client
 
     }
 
+    public static bool JoinClass(NetworkDataHelper networkDataHelper)
+    {
+
+        return true;
+    }
+
     public static bool CreateClass(NetworkDataHelper networkDataHelper)
     {
         Console.Write("Enter class name: ");
         string? className = Console.ReadLine();
-        if (className == null)
+        if (className == "")
         {
             Console.WriteLine("Class name can't be null.");
             return true;
         }
         Console.Write("Enter class description: ");
         string? classDescription = Console.ReadLine();
-        if (classDescription == null)
+        if (classDescription == "")
         {
             Console.WriteLine("Class description can't be null.");
             return true;
@@ -237,19 +377,19 @@ public class Client
         Console.Write("Enter class duration (in minutes): ");
         string? classDuration = Console.ReadLine();
 
-        if (classDuration == null)
+        if (classDuration == "")
         {
             Console.WriteLine("class duration cannot be null");
             return true;
         }
-        Console.WriteLine("Class maximum quotas");
+        Console.WriteLine("Enter class maximum quotas: ");
         string? classuQotas = Console.ReadLine();
-        if (classuQotas == null)
+        if (classuQotas == "")
         {
             Console.WriteLine("Class quotas cannot be null");
             return true;
         }
-        string ClassData = className + "|" + classDescription + "|" + classDuration + "|" + classuQotas;
+        string ClassData = className + "|" + classDescription + "|" + classDuration + "|" + classuQotas + "|" + userLogged;
         byte[] commandData = Encoding.UTF8.GetBytes(ClassData);
         int commandLength = commandData.Length;
         byte[] commandDataLenght = BitConverter.GetBytes(commandLength);
