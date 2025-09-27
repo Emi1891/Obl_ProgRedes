@@ -23,3 +23,12 @@ C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Client\obj\Debug\net8.0\
 C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Client\obj\Debug\net8.0\Client.pdb
 C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Client\obj\Debug\net8.0\Client.genruntimeconfig.cache
 C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Client\obj\Debug\net8.0\ref\Client.dll
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.csproj.AssemblyReference.cache
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.AssemblyInfoInputs.cache
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.AssemblyInfo.cs
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.csproj.CoreCompileInputs.cache
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.sourcelink.json
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.dll
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\refint\Client.dll
+C:\Users\Usuario\Desktop\obligatorioProgDeRedes\obl-n6a-ingenieria-274715-251525-286049\obl-n6a-ingenieria-274715-251525-286049\Clases Online\Client\obj\Debug\net8.0\Client.pdb

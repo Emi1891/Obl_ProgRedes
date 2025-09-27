@@ -1,12 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "0MH9VXVv1ng=",
+  "dgSpecHash": "b0gEL84Bv34=",
   "success": true,
-  "projectFilePath": "C:\\Users\\santi\\Desktop\\Obli Prog de redes\\Clases Online\\Client\\Client.csproj",
+  "projectFilePath": "C:\\Users\\Usuario\\Desktop\\obligatorioProgDeRedes\\obl-n6a-ingenieria-274715-251525-286049\\obl-n6a-ingenieria-274715-251525-286049\\Clases Online\\Client\\Client.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\santi\\.nuget\\packages\\system.configuration.configurationmanager\\9.0.9\\system.configuration.configurationmanager.9.0.9.nupkg.sha512",
-    "C:\\Users\\santi\\.nuget\\packages\\system.diagnostics.eventlog\\9.0.9\\system.diagnostics.eventlog.9.0.9.nupkg.sha512",
-    "C:\\Users\\santi\\.nuget\\packages\\system.security.cryptography.protecteddata\\9.0.9\\system.security.cryptography.protecteddata.9.0.9.nupkg.sha512"
+    "C:\\Users\\Usuario\\.nuget\\packages\\system.configuration.configurationmanager\\9.0.9\\system.configuration.configurationmanager.9.0.9.nupkg.sha512",
+    "C:\\Users\\Usuario\\.nuget\\packages\\system.diagnostics.eventlog\\9.0.9\\system.diagnostics.eventlog.9.0.9.nupkg.sha512",
+    "C:\\Users\\Usuario\\.nuget\\packages\\system.security.cryptography.protecteddata\\9.0.9\\system.security.cryptography.protecteddata.9.0.9.nupkg.sha512"
   ],
   "logs": []
 }

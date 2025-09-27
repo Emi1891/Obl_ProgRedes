@@ -1,188 +1,219 @@
-﻿
-using System.ComponentModel;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Threading;
 using Common;
 using Dominio;
 
-
 namespace Server
 {
-
     internal class Server
     {
+        // --- límites y estado de conexiones ---
         static readonly int maxClientsAllowed = 3;
         static readonly object clientThreadsLock = new object();
         static int currentClients = 0;
-        static readonly SettingManager settingsMgr = new SettingManager();
-        static List<Usuario> users = new List<Usuario>();
-        static readonly object usersLock = new object();
-        static List<Clase> clases = new List<Clase>();
 
+        // --- configuración y dominio ---
+        static readonly SettingManager settingsMgr = new SettingManager();
+
+        static readonly List<Usuario> users = new List<Usuario>();
+        static readonly object usersLock = new object();
+
+        static readonly List<Clase> clases = new List<Clase>();
+        static readonly object clasesLock = new object();
 
         static void Main(string[] args)
         {
-            Usuario U = new Usuario("1", "1");
-            users.Add(U);
+            // Usuario semilla (opcional)
+            users.Add(new Usuario("1", "1"));
+
             Console.WriteLine("Starting Server Application ... ");
-            Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+
+            var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
+            var serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
-            IPEndPoint serverEndPoint = new IPEndPoint(serverIp, serverPort);
-
+            // Bind + Listen
             serverSocket.Bind(serverEndPoint);
             serverSocket.Listen();
-            Console.WriteLine("Server waiting for conection...");
+            Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
-            while (currentClients < maxClientsAllowed)
+            // Acepta SIEMPRE, controla cupo por conexión
+            while (true)
             {
                 Socket clientSocket = serverSocket.Accept();
+
+                bool admit;
                 lock (clientThreadsLock)
                 {
-                    currentClients++;
+                    admit = currentClients < maxClientsAllowed;
+                    if (admit) currentClients++;
                 }
+
+                if (!admit)
+                {
+                    // opcional: enviar un mensaje breve
+                    try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
+                    clientSocket.Close();
+                    continue;
+                }
+
                 int clientNum = currentClients;
-                Console.WriteLine("Client connected. Current clients: " + currentClients);
-                Thread clientThread = new Thread(() => HandleClient(clientSocket, clientNum));
+                Console.WriteLine($"Client connected. Current clients: {currentClients}");
+
+                var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
                 clientThread.Start();
             }
 
-            serverSocket.Close();
-
+            // (no se llega; si necesitás cierre controlado, agregá una señal externa)
+            // serverSocket.Close();
         }
-
 
         static void HandleClient(Socket clientSocket, int clientNum)
         {
             bool connected = true;
-            NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
             bool clientLogged = false;
-            while (connected)                                                                              //CLIENTE POR LOGGEAR
+
+            var networkDataHelper = new NetworkDataHelper(clientSocket);
+
+            try
             {
-                while (!clientLogged)
+                while (connected)
                 {
-                    try
+                    // --- Bucle previo al login ---
+                    while (!clientLogged && connected)
                     {
-                        byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
-
-                        byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
-                        string commandString = Encoding.UTF8.GetString(commandStringBytes);
-                        Command command = (Command)int.Parse(commandString);
-
-                        byte[] commandDataLenght = networkDataHelper.Receive(sizeof(int));
-                        int lenght = BitConverter.ToInt32(commandDataLenght);
-                        byte[] commandData = networkDataHelper.Receive(lenght);
-
-                        switch (command)
+                        try
                         {
-                            case Command.Register:
-                                HandleRegister(networkDataHelper, commandData);
-                                break;
-                            case Command.Login:
-                                clientLogged = HandleLogin(networkDataHelper, commandData);
-                                break;
-                            default:
-                                Console.WriteLine("Unknown command received from client " + clientNum);
-                                break;
+                            byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
+                            byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
+                            string commandString = Encoding.UTF8.GetString(commandStringBytes);
+                            Command command = (Command)int.Parse(commandString);
+
+                            byte[] commandDataLength = networkDataHelper.Receive(sizeof(int));
+                            int length = BitConverter.ToInt32(commandDataLength);
+                            byte[] commandData = length > 0 ? networkDataHelper.Receive(length) : Array.Empty<byte>();
+
+                            switch (command)
+                            {
+                                case Command.Register:
+                                    HandleRegister(networkDataHelper, commandData);
+                                    break;
+                                case Command.Login:
+                                    clientLogged = HandleLogin(networkDataHelper, commandData);
+                                    break;
+                                default:
+                                    Console.WriteLine($"Unknown pre-login command from client {clientNum}: {command}");
+                                    break;
+                            }
+                        }
+                        catch (SocketException se)
+                        {
+                            Console.WriteLine($"Socket error with client {clientNum}: {se.Message}");
+                            connected = false;
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine($"Error handling client {clientNum} (pre-login): {e.Message}");
+                            connected = false;
                         }
                     }
-                    catch (SocketException se)
+
+                    // --- Bucle con cliente logueado ---
+                    while (clientLogged && connected)
                     {
-                        Console.WriteLine("Socket error with client " + clientNum + ": " + se.Message);
-                        connected = false;
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("Error handling client " + clientNum + ": " + e.Message);
-                        connected = false;
-                    }
-                }
-
-                while (clientLogged)                                                                                        //CLIENTE LOGGEADO
-                {
-                    try
-                    {
-                        byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
-
-                        byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
-                        string commandString = Encoding.UTF8.GetString(commandStringBytes);
-                        CommandLogged commandLogged = (CommandLogged)int.Parse(commandString);
-
-                        byte[] commandDataLenght = networkDataHelper.Receive(sizeof(int));
-                        int lenght = BitConverter.ToInt32(commandDataLenght);
-                        byte[] commandData = networkDataHelper.Receive(lenght);
-
-                        switch (commandLogged)
+                        try
                         {
-                            case CommandLogged.CreateClass:
-                                HandleCreateClass(networkDataHelper, commandData);
-                                break;
-                            case CommandLogged.JoinClass:
-                                // HandleJoinClass(networkDataHelper, commandData);
-                                break;
-                            case CommandLogged.ListClasses:
-                                HandleListClasses(networkDataHelper, commandData);
-                                break;
-                            case CommandLogged.LeaveClass:
-                                // HandleLeaveClass(networkDataHelper, commandData);
-                                break;
-                            case CommandLogged.History:
-                                // HandleHistory(networkDataHelper, commandData);
-                                break;
-                            case CommandLogged.Exit:
-                                HandleLogout(networkDataHelper, commandData);
-                                clientLogged = false;
-                                break;
-                            default:
-                                Console.WriteLine("Unknown command received from client " + clientNum);
-                                break;
+                            byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
+
+                            byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
+                            string commandString = Encoding.UTF8.GetString(commandStringBytes);
+                            CommandLogged commandLogged = (CommandLogged)int.Parse(commandString);
+
+                            byte[] commandDataLength = networkDataHelper.Receive(sizeof(int));
+                            int length = BitConverter.ToInt32(commandDataLength);
+                            byte[] commandData = length > 0 ? networkDataHelper.Receive(length) : Array.Empty<byte>();
+
+                            switch (commandLogged)
+                            {
+                                case CommandLogged.CreateClass:
+                                    HandleCreateClass(networkDataHelper, commandData);
+                                    break;
+                                case CommandLogged.JoinClass:
+                                    // TODO: HandleJoinClass(networkDataHelper, commandData);
+                                    break;
+                                case CommandLogged.ListClasses:
+                                    HandleListClasses(networkDataHelper, commandData);
+                                    break;
+                                case CommandLogged.LeaveClass:
+                                    // TODO: HandleLeaveClass(networkDataHelper, commandData);
+                                    break;
+                                case CommandLogged.History:
+                                    // TODO: HandleHistory(networkDataHelper, commandData);
+                                    break;
+                                case CommandLogged.Exit:
+                                    HandleLogout(networkDataHelper, commandData);
+                                    clientLogged = false; // vuelve al menú inicial del cliente
+                                    break;
+                                default:
+                                    Console.WriteLine($"Unknown logged-in command from client {clientNum}: {commandLogged}");
+                                    break;
+                            }
+                        }
+                        catch (SocketException se)
+                        {
+                            Console.WriteLine($"Socket error with client {clientNum}: {se.Message}");
+                            connected = false;
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine($"Error handling client {clientNum} (logged): {e.Message}");
+                            connected = false;
                         }
                     }
-                    catch (SocketException se)
-                    {
-                        Console.WriteLine("Socket error with client " + clientNum + ": " + se.Message);
-                        connected = false;
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("Error handling client " + clientNum + ": " + e.Message);
-                        connected = false;
-                    }
                 }
-
-
             }
-            clientSocket.Shutdown(SocketShutdown.Both);
-            clientSocket.Close();
-            lock (clientThreadsLock)
+            finally
             {
-                currentClients--;
+                try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
+                clientSocket.Close();
+                lock (clientThreadsLock) { currentClients--; }
+                Console.WriteLine($"Client {clientNum} disconnected. Current clients: {currentClients}");
             }
-            Console.WriteLine("Client " + clientNum + " disconnected. Current clients: " + currentClients);
         }
+
+        // --- Comandos ---
+
         static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             Console.WriteLine("Client logged out.");
-            byte[] response = BitConverter.GetBytes(false);
-            networkDataHelper.Send(response);
+            // Confirmamos al cliente que el logout fue exitoso
+            networkDataHelper.Send(BitConverter.GetBytes(true));
         }
-        static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] Data)
+
+        static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
         {
-            StringBuilder sb = new StringBuilder();
-            lock (usersLock)
+            string classList;
+            lock (clasesLock)
             {
-                foreach (var clase in clases)
+                var sb = new StringBuilder();
+                foreach (var c in clases)
                 {
-                    sb.AppendLine($"Class: {clase.Nombre}, Description: {clase.Descripcion}, Duration: {clase.Duracion}, Available Spots: {clase.CuposDisponibles}");
+                    sb.AppendLine($"Class: {c.Nombre}, Description: {c.Descripcion}, Duration: {c.Duracion}, Available Spots: {c.CuposDisponibles}");
                 }
+                classList = sb.ToString();
             }
-            string classList = sb.ToString();
-            byte[] response = Encoding.UTF8.GetBytes(classList);
-            networkDataHelper.Send(response);
+
+            byte[] payload = Encoding.UTF8.GetBytes(classList);
+            byte[] len = BitConverter.GetBytes(payload.Length);
+            networkDataHelper.Send(len);
+            if (payload.Length > 0) networkDataHelper.Send(payload);
         }
 
         static void HandleRegister(NetworkDataHelper networkDataHelper, byte[] commandData)
@@ -193,17 +224,17 @@ namespace Server
             string password = nameAndPass[1];
 
             bool added = false;
-
             lock (usersLock)
             {
-                if (!users.Any(u => string.Equals(username, u.nombre)))
+                bool exists = users.Any(u => string.Equals(username, u.nombre, StringComparison.Ordinal));
+                if (!exists)
                 {
                     users.Add(new Usuario(username, password));
                     added = true;
                 }
             }
-            byte[] response = BitConverter.GetBytes(added);
-            networkDataHelper.Send(response);
+
+            networkDataHelper.Send(BitConverter.GetBytes(added));
         }
 
         static bool HandleLogin(NetworkDataHelper networkDataHelper, byte[] commandData)
@@ -212,62 +243,69 @@ namespace Server
             string[] nameAndPass = dataString.Split('|');
             string username = nameAndPass[0].Trim();
             string password = nameAndPass[1];
-            bool validUser = false;
+
+            bool validUser;
             lock (usersLock)
             {
-                validUser = users.Any(u => string.Equals(username, u.nombre) && u.contrasena == password);
-
-            }
-            if (validUser)
-            {
-                Console.WriteLine("User " + username + " logged in.");
-                byte[] response = BitConverter.GetBytes(validUser);
-                networkDataHelper.Send(response);
-                return true;
-            }
-            else
-            {
-                byte[] response = BitConverter.GetBytes(validUser);
-                networkDataHelper.Send(response);
-                return false;
+                validUser = users.Any(u =>
+                    string.Equals(username, u.nombre, StringComparison.Ordinal) &&
+                    u.contrasena == password);
             }
 
+            networkDataHelper.Send(BitConverter.GetBytes(validUser));
+            if (validUser) Console.WriteLine($"User {username} logged in.");
+            return validUser;
         }
 
+        // Cliente envía: name|desc|quota|yyyy-MM-dd HH:mm|dur|user
         static bool HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
-            string[] classData = dataString.Split('|');
-            string className = classData[0];
-            string description = classData[1];
-            int duration = int.Parse(classData[2]);
-            int quota = int.Parse(classData[3]);
-            string username = classData[4];
-            bool validClass = false;
-            bool created = false;
+            string[] p = dataString.Split('|');
+            if (p.Length < 6)
+            {
+                dataHelper.Send(BitConverter.GetBytes(false));
+                return false;
+            }
 
-            Usuario owner = users.FirstOrDefault(u => string.Equals(username, u.nombre));
+            string name = p[0];
+            string desc = p[1];
+            bool okQuota = int.TryParse(p[2], out int quota);
+            string dateTimeStr = p[3]; // por ahora no se usa; podés parsearlo si tu modelo lo soporta
+            bool okDur = int.TryParse(p[4], out int dur);
+            string user = p[5];
 
+            if (!okQuota || !okDur)
+            {
+                dataHelper.Send(BitConverter.GetBytes(false));
+                return false;
+            }
+
+            Usuario owner;
             lock (usersLock)
             {
-                validClass = !(clases.Any(c => string.Equals(c.Nombre, className)));
+                owner = users.FirstOrDefault(u => string.Equals(user, u.nombre, StringComparison.Ordinal));
+            }
+            if (owner == null)
+            {
+                dataHelper.Send(BitConverter.GetBytes(false));
+                return false;
+            }
 
-            }
-            if (validClass)
+            bool created = false;
+            lock (clasesLock)
             {
-                Clase newClass = new Clase(className, description, duration, quota, owner);
-                created = true;
-                byte[] response = BitConverter.GetBytes(created);
-                dataHelper.Send(response);
-                return true;
+                bool exists = clases.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
+                if (!exists)
+                {
+                    var nueva = new Clase(name, desc, dur, quota, owner);
+                    clases.Add(nueva);     // IMPORTANTE: agregar a la lista
+                    created = true;
+                }
             }
-            else
-            {
-                byte[] response = BitConverter.GetBytes(created);
-                dataHelper.Send(response);
-                return true;
-            }
+
+            dataHelper.Send(BitConverter.GetBytes(created));
+            return created;
         }
     }
 }
-
