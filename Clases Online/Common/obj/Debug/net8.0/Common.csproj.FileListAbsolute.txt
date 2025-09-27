@@ -4,3 +4,10 @@ C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\
 C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\Common.AssemblyInfo.cs
 C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\Common.csproj.CoreCompileInputs.cache
 C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\Common.sourcelink.json
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\bin\Debug\net8.0\Common.deps.json
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\bin\Debug\net8.0\Common.dll
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\bin\Debug\net8.0\Common.pdb
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\Common.dll
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\refint\Common.dll
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\Common.pdb
+C:\Users\santi\Desktop\Obli Prog de redes\Clases Online\Common\obj\Debug\net8.0\ref\Common.dll

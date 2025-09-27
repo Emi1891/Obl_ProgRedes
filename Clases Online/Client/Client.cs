@@ -24,7 +24,7 @@ public class Client
         Console.Write("Choose an option: ");
     }
 
-    static void Main()
+    static void Main(string[] args)
     {
         Console.WriteLine("Starting Client Aplicaction ... ");
 

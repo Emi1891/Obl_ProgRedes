@@ -1,8 +1,12 @@
 {
   "version": 2,
-  "dgSpecHash": "/uFonXYvNKE=",
+  "dgSpecHash": "iLsQvtwfiXQ=",
   "success": true,
   "projectFilePath": "C:\\Users\\santi\\Desktop\\Obli Prog de redes\\Clases Online\\Server\\Server.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\santi\\.nuget\\packages\\system.configuration.configurationmanager\\9.0.9\\system.configuration.configurationmanager.9.0.9.nupkg.sha512",
+    "C:\\Users\\santi\\.nuget\\packages\\system.diagnostics.eventlog\\9.0.9\\system.diagnostics.eventlog.9.0.9.nupkg.sha512",
+    "C:\\Users\\santi\\.nuget\\packages\\system.security.cryptography.protecteddata\\9.0.9\\system.security.cryptography.protecteddata.9.0.9.nupkg.sha512"
+  ],
   "logs": []
 }

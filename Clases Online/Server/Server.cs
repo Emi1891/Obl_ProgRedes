@@ -1,11 +1,12 @@
 ﻿
 using System.ComponentModel;
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Common;
 using Dominio;
-using Server.Dominio;
+
 
 namespace Server
 {
@@ -14,13 +15,13 @@ namespace Server
     {
         static readonly int maxClientsAllowed = 3;
         static readonly object clientThreadsLock = new object();
-        static int currentClientCount = 0;
-        static readonly SettingsManager settingsMgr = new SettingsManager();
-        static List<Usuario> users = new List<Usuario>;
+        static int currentClients = 0;
+        static readonly SettingManager settingsMgr = new SettingManager();
+        static List<Usuario> users = new List<Usuario>();
         static readonly object usersLock = new object();
         static List<Clase> clases = new List<Clase>();
 
-        static void main(String[] args)
+        static void Main(string[] args)
         {
             Console.WriteLine("Starting Server Application ... ");
             Socket serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -39,10 +40,10 @@ namespace Server
                 Socket clientSocket = serverSocket.Accept();
                 lock (clientThreadsLock)
                 {
-                    currentClientCount++;
+                    currentClients++;
                 }
-                int clientNum = currentClientCount;
-                Console.WriteLine("Client connected. Current clients: " + currentClientCount);
+                int clientNum = currentClients;
+                Console.WriteLine("Client connected. Current clients: " + currentClients);
                 Thread clientThread = new Thread(() => HandleClient(clientSocket, clientNum));
                 clientThread.Start();
             }
@@ -51,11 +52,11 @@ namespace Server
 
         }
 
-    }
-    static void HandleClient(Socket clientSocket, int clientNum)
+
+        static void HandleClient(Socket clientSocket, int clientNum)
         {
             bool connected = true;
-            NetworkDataHelper dataHelper = new NetworkDataHelper(clientSocket);
+            NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
 
             while (connected)
             {
@@ -63,27 +64,24 @@ namespace Server
                 {
                     byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
 
-                    byte[] commandStringBytes = NetworkDataHelper.Receive(Protocol.CommandStringLength);
+                    byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
                     string commandString = Encoding.UTF8.GetString(commandStringBytes);
-                    commandString command = (Command)int.Parse(commandString);
+                    Command command = (Command)int.Parse(commandString);
 
-                    byte[] commandDataLenght = NetworkDataHelper.Receive(sizeof(int));
+                    byte[] commandDataLenght = networkDataHelper.Receive(sizeof(int));
                     int lenght = BitConverter.ToInt32(commandDataLenght);
-                    byte[] commandData = NetworkDataHelper.Receive(lenght);
+                    byte[] commandData = networkDataHelper.Receive(lenght);
 
                     switch (command)
                     {
-                        case 1:
-                            HandleRegister(dataHelper, commandData);
+                        case Command.Register:
+                            HandleRegister(networkDataHelper, commandData);
                             break;
-                        case 2:
-                            HandleLogin(dataHelper, commandData);
+                        case Command.Login:
+                            HandleLogin(networkDataHelper, commandData);
                             break;
-                        case 3:
-                            HandleCreateClass(dataHelper, commandData);
-                            break;
-                        case 4:
-                            connected = false;
+                        case Command.CreateClass:
+                            HandleCreateClass(networkDataHelper, commandData);
                             break;
                         default:
                             Console.WriteLine("Unknown command received from client " + clientNum);
@@ -105,12 +103,12 @@ namespace Server
             clientSocket.Close();
             lock (clientThreadsLock)
             {
-                currentClientCount--;
+                currentClients--;
             }
-            Console.WriteLine("Client " + clientNum + " disconnected. Current clients: " + currentClientCount);
+            Console.WriteLine("Client " + clientNum + " disconnected. Current clients: " + currentClients);
         }
 
-        static void HandleRegister(NetworkDataHelper dataHelper, byte[] commandData)
+        static void HandleRegister(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
             string[] nameAndPass = dataString.Split('|');
@@ -131,7 +129,7 @@ namespace Server
             networkDataHelper.Send(response);
         }
 
-        static void HandleLogin(NetworkDataHelper dataHelper, byte[] commandData)
+        static void HandleLogin(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
             string[] nameAndPass = dataString.Split('|');
@@ -140,7 +138,7 @@ namespace Server
             bool validUser = false;
             lock (usersLock)
             {
-                validUser = users.Any(u => string.Equals(username, u.nombre) && u.Password == password);
+                validUser = users.Any(u => string.Equals(username, u.nombre) && u.contrasena == password);
             }
             byte[] response = BitConverter.GetBytes(validUser);
             networkDataHelper.Send(response);
@@ -158,7 +156,7 @@ namespace Server
 
             bool created = false;
 
-            Usuario owner = usuarios.FirstOrDefault(u => string.Equals(username, u.nombre));
+            Usuario owner = users.FirstOrDefault(u => string.Equals(username, u.nombre));
 
             lock (usersLock)
             {
@@ -171,4 +169,5 @@ namespace Server
             }
         }
     }
+}
 
