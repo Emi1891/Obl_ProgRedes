@@ -125,7 +125,7 @@ namespace Server
                                 // HandleJoinClass(networkDataHelper, commandData);
                                 break;
                             case CommandLogged.ListClasses:
-                                HandleListClasses(networkDataHelper);
+                                HandleListClasses(networkDataHelper, commandData);
                                 break;
                             case CommandLogged.LeaveClass:
                                 // HandleLeaveClass(networkDataHelper, commandData);
@@ -134,6 +134,7 @@ namespace Server
                                 // HandleHistory(networkDataHelper, commandData);
                                 break;
                             case CommandLogged.Exit:
+                                HandleLogout(networkDataHelper, commandData);
                                 clientLogged = false;
                                 break;
                             default:
@@ -163,7 +164,13 @@ namespace Server
             }
             Console.WriteLine("Client " + clientNum + " disconnected. Current clients: " + currentClients);
         }
-        static void HandleListClasses(NetworkDataHelper networkDataHelper)
+        static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
+        {
+            Console.WriteLine("Client logged out.");
+            byte[] response = BitConverter.GetBytes(false);
+            networkDataHelper.Send(response);
+        }
+        static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] Data)
         {
             StringBuilder sb = new StringBuilder();
             lock (usersLock)

@@ -203,10 +203,7 @@ public class Client
     }
     internal static bool logout(NetworkDataHelper networkDataHelper)
     {
-        try
-        {
-            byte[] result = networkDataHelper.Receive(1);
-            bool loggedOut = BitConverter.ToBoolean(result);
+        try { 
             if (loggedOut)
             {
                 Console.WriteLine("Logged out successfully.");
