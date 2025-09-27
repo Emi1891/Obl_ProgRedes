@@ -269,13 +269,13 @@ public class Client
             byte[] result = networkDataHelpe.Receive(1);
             bool ok = BitConverter.ToBoolean(result);
 
-            if (loggedIn)
+            if (ok)
             {
                 Console.WriteLine("\nRegistered successfully.");
             }
             else
             {
-                Console.WriteLine("\nRegister failed, that username already exists");
+                Console.WriteLine("\nRegister failed, that username already exists.");
             }
             return true;
         }
