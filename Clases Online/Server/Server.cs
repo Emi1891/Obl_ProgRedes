@@ -26,10 +26,19 @@ namespace Server
         static readonly List<Clase> clases = new List<Clase>();
         static readonly object clasesLock = new object();
 
+
         static void Main(string[] args)
         {
             // Usuario semilla (opcional)
             users.Add(new Usuario("1", "1"));
+
+            // Clases de ejemplo creadas por el usuario base
+            var usuarioBase = users.First(u => u.nombre == "1");
+            clases.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase));
+            clases.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase));
+            clases.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase));
+            clases.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase));
+            clases.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase));
 
             Console.WriteLine("Starting Server Application ... ");
 
@@ -149,6 +158,7 @@ namespace Server
                                     // TODO: HandleJoinClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.ListClasses:
+                                    Console.WriteLine("Llego a ListClasses");
                                     HandleListClasses(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.LeaveClass:
@@ -199,21 +209,35 @@ namespace Server
 
         static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
         {
-            string classList;
-            lock (clasesLock)
+            //Primero enviamos la cantidad de clases
+                    Console.WriteLine("envio la cantidad de clases");
+
+            //Luego enviamos cada clase
+            try
             {
-                var sb = new StringBuilder();
-                foreach (var c in clases)
+
+
+                lock (clasesLock)
                 {
-                    sb.AppendLine($"Class: {c.Nombre}, Description: {c.Descripcion}, Duration: {c.Duracion}, Available Spots: {c.CuposDisponibles}");
+
+                    int cantClases = clases.Count;
+                    byte[] cantClasesBytes = BitConverter.GetBytes(cantClases);
+                    networkDataHelper.Send(cantClasesBytes);
+                    foreach (var clase in clases)
+                    {
+                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
+                        byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
+                        byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
+                        networkDataHelper.Send(claseInfoLengthBytes);
+                        networkDataHelper.Send(claseInfoBytes);
+                    }
                 }
-                classList = sb.ToString();
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error sending class list: {e.Message}");
             }
 
-            byte[] payload = Encoding.UTF8.GetBytes(classList);
-            byte[] len = BitConverter.GetBytes(payload.Length);
-            networkDataHelper.Send(len);
-            if (payload.Length > 0) networkDataHelper.Send(payload);
         }
 
         static void HandleRegister(NetworkDataHelper networkDataHelper, byte[] commandData)
@@ -270,7 +294,7 @@ namespace Server
 
             string name = p[0];
             string desc = p[1];
-            bool okQuota = int.TryParse(p[2], out int quota); // No entendi bien esta validacion. Capaz es mejor hacerla en el cliente
+            bool okQuota = int.TryParse(p[2], out int quota); // No entendi bien esta validacion. Capaz es mejor hacerla en el cliente -> santi: Es para fijarse si el cupo es un numero y no otra cosa
             string startDate = p[3];
             string startTime = p[4];
             bool okDur = int.TryParse(p[5], out int dur);
