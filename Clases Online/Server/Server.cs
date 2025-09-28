@@ -34,11 +34,12 @@ namespace Server
 
             // Clases de ejemplo creadas por el usuario base
             var usuarioBase = users.First(u => u.nombre == "1");
-            clases.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase));
-            clases.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase));
-            clases.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase));
-            clases.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase));
-            clases.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase));
+            string today = DateTime.Now.ToString("yyyy-MM-dd");
+            clases.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
+            clases.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
+            clases.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
+            clases.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
+            clases.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
 
             Console.WriteLine("Starting Server Application ... ");
 
@@ -162,7 +163,7 @@ namespace Server
                                     HandleListClasses(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.LeaveClass:
-                                    // TODO: HandleLeaveClass(networkDataHelper, commandData);
+                                    HandleLeaveClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.History:
                                     // TODO: HandleHistory(networkDataHelper, commandData);
@@ -199,7 +200,10 @@ namespace Server
         }
 
         // --- Comandos ---
+        static void HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
+        {
 
+        }
         static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             Console.WriteLine("Client logged out.");
@@ -383,7 +387,8 @@ namespace Server
                             Console.WriteLine("SERVER CAYO EN EXCEPTION: "+ e.Message);
                         }
                     }
-                    var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime, imgUrl);
+                    var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime);
+                    if (imgUrl != "") nueva.UrlFoto = imgUrl;
                     clases.Add(nueva);
                     created = true;
                 }
