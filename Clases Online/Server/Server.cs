@@ -270,12 +270,13 @@ namespace Server
 
             string name = p[0];
             string desc = p[1];
-            bool okQuota = int.TryParse(p[2], out int quota); // No entendi bien esta validacion. Capaz es mejor hacerla en el cliente
+            bool okQuota = int.TryParse(p[2], out int quota);
             string startDate = p[3];
             string startTime = p[4];
             bool okDur = int.TryParse(p[5], out int dur);
             string hasImg = p[6];
             string user = p[7];
+            string imgUrl = "";
 
             if (!okQuota || !okDur)
             {
@@ -309,6 +310,7 @@ namespace Server
 
                             byte[] fileNameBuffer = dataHelper.Receive(fileNameLength);
                             string fileName = Encoding.UTF8.GetString(fileNameBuffer);
+                            // Se podria agregar una validacion para que no se pueda subir una imagen con el mismo nombre que otra
 
                             byte[] fileSizeBuffer = dataHelper.Receive(Protocol.FileSizeLenghtSize);
                             long fileSize = BitConverter.ToInt64(fileSizeBuffer);
@@ -343,11 +345,12 @@ namespace Server
                             }
 
                             Console.WriteLine($"File {fileName} received successfully.");
+                            imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName; // No se si hace falta guardar la ruta completa pero por las dudas lo dejo asi
                         }
                         catch (SocketException e)
                         {
                             // Agregar manejo de error
-                            // Ejemplo de clase: clientActive = false;
+                            // Ejemplo en repo de clase: clientActive = false;
                             Console.WriteLine("SERVER CAYO EN SOCKET EXCEPTION: " + e.Message);
                         }
                         catch (Exception e)
@@ -356,8 +359,8 @@ namespace Server
                             Console.WriteLine("SERVER CAYO EN EXCEPTION: "+ e.Message);
                         }
                     }
-                    var nueva = new Clase(name, desc, dur, quota, owner);
-                    clases.Add(nueva);     // IMPORTANTE: agregar a la lista
+                    var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime, imgUrl);
+                    clases.Add(nueva);
                     created = true;
                 }
             }
