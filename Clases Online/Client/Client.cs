@@ -215,21 +215,27 @@ public class Client
     {
         try
         {
-            byte[] classesLengthBytes = networkDataHelper.Receive(4);
-            int classesLength = BitConverter.ToInt32(classesLengthBytes);
-            byte[] classesBytes = networkDataHelper.Receive(classesLength);
-            string classesString = Encoding.UTF8.GetString(classesBytes);
-            if (string.IsNullOrWhiteSpace(classesString))
+            // Enviamos longitud cero porque no hay datos adicionales para este comando
+            byte[] len0 = BitConverter.GetBytes(0);
+            networkDataHelper.Send(len0);
+
+            //primero recivo la cantidad de clases
+            byte[] classCountBytes = networkDataHelper.Receive(4);
+            int classCount = BitConverter.ToInt32(classCountBytes);
+            if (classCount == 0)
             {
                 Console.WriteLine("\nNo classes available.");
                 return true;
             }
-
-            Console.WriteLine("Available classes:");
-            foreach (var line in classesString.Split('\n'))
+            Console.WriteLine($"\nThere are {classCount} classes available:");
+            for (int i = 0; i < classCount; i++)
             {
-                if (!string.IsNullOrWhiteSpace(line))
-                    Console.WriteLine(line.Trim());
+                byte[] classDataLengthBytes = networkDataHelper.Receive(4);
+                int classDataLength = BitConverter.ToInt32(classDataLengthBytes);
+                byte[] classDataBytes = networkDataHelper.Receive(classDataLength);
+                string classData = Encoding.UTF8.GetString(classDataBytes);
+                Console.WriteLine($"\nClass {i + 1}:");
+                Console.WriteLine(classData.Replace("|", "\n"));
             }
             return true;
         }

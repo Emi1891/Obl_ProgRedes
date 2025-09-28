@@ -28,7 +28,7 @@ public class Clase
         }
     }
 
-    public Clase(string _nombre, string _descripcion, int _duracion, int _cupos, Usuario _usuario, string _fechaInicio, string _horaInicio, string _urlFoto)
+    public Clase(string _nombre, string _descripcion, int _duracion, int _cupos, Usuario _usuario, string _fechaInicio, string _horaInicio)
     {
         Nombre = _nombre;
         Descripcion = _descripcion;
@@ -37,7 +37,6 @@ public class Clase
         owner = _usuario;
         Fecha = DateTime.Parse(_fechaInicio);
         Hora = _horaInicio;
-        UrlFoto = _urlFoto;
     }
 
     public void AgregarUsuario()
