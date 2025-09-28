@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Common;
@@ -23,7 +24,7 @@ namespace Server
         static readonly List<Usuario> users = new List<Usuario>();
         static readonly object usersLock = new object();
 
-        static readonly List<Clase> clases = new List<Clase>();
+        static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
 
         static void Main(string[] args)
@@ -86,7 +87,7 @@ namespace Server
             {
                 while (connected)
                 {
-                    // --- Bucle previo al login ---
+                    // While previo al login
                     while (!clientLogged && connected)
                     {
                         try
@@ -125,7 +126,7 @@ namespace Server
                         }
                     }
 
-                    // --- Bucle con cliente logueado ---
+                    // While con cliente logueado
                     while (clientLogged && connected)
                     {
                         try
@@ -146,7 +147,7 @@ namespace Server
                                     HandleCreateClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.JoinClass:
-                                    // TODO: HandleJoinClass(networkDataHelper, commandData);
+                                    HandleJoinClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.ListClasses:
                                     HandleListClasses(networkDataHelper, commandData);
@@ -203,7 +204,7 @@ namespace Server
             lock (clasesLock)
             {
                 var sb = new StringBuilder();
-                foreach (var c in clases)
+                foreach (var c in classes)
                 {
                     sb.AppendLine($"Class: {c.Nombre}, Description: {c.Descripcion}, Duration: {c.Duracion}, Available Spots: {c.CuposDisponibles}");
                 }
@@ -257,7 +258,7 @@ namespace Server
             return validUser;
         }
 
-        // Cliente envía: name|desc|quota|yyyy-MM-dd|HH:mm|dur|hasImg|user
+        // Cliente envia: name|desc|quota|yyyy-MM-dd|HH:mm|dur|hasImg|user
         static bool HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
@@ -277,6 +278,7 @@ namespace Server
             string hasImg = p[6];
             string user = p[7];
             string imgUrl = "";
+            // Falta agregar link a la clase
 
             if (!okQuota || !okDur)
             {
@@ -298,7 +300,7 @@ namespace Server
             bool created = false;
             lock (clasesLock)
             {
-                bool exists = clases.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
+                bool exists = classes.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
                 if (!exists)
                 {
                     if (hasImg == "y")
@@ -360,13 +362,41 @@ namespace Server
                         }
                     }
                     var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime, imgUrl);
-                    clases.Add(nueva);
+                    classes.Add(nueva);
                     created = true;
                 }
             }
 
             dataHelper.Send(BitConverter.GetBytes(created));
             return created;
+        }
+
+        static void HandleJoinClass(NetworkDataHelper networkDataHelper, byte[] data)
+        {
+            bool joined = false;
+            bool allClassesSent = false;
+            List<string> classesToSend = new List<string>();
+            lock (clasesLock) {
+                foreach (var c in classes)
+                {
+                    try
+                    {
+                        byte[] nameBuffer = Encoding.UTF8.GetBytes(c.Nombre);
+                        networkDataHelper.Send(nameBuffer);
+                    }
+                    catch (SocketException se)
+                    {
+                        // Manejar excepcion
+                    }
+                    catch (Exception e)
+                    {
+                        // Manejar excepcion
+                    }
+                }
+                networkDataHelper.Send(BitConverter.GetBytes(allClassesSent));
+            }
+
+            networkDataHelper.Send(BitConverter.GetBytes(joined));
         }
     }
 }
