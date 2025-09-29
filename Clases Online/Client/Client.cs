@@ -418,6 +418,7 @@ public class Client
                 Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
                 Console.WriteLine($"Taken places: {classDataSplit[2]}");
                 Console.WriteLine($"Creator: {classDataSplit[7]}");
+                Console.WriteLine($"Link: {classDataSplit[8]}");
 
                 string hasImg = "Yes";
                 if (classDataSplit[6] == "No image uploaded")

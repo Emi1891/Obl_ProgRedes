@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 
 namespace Dominio;
@@ -18,7 +19,7 @@ public class Clase
     public string? UrlFoto { get; set; } = "No image uploaded";
     public int Duracion { get; set; }
     public Usuario owner { get; set; }
-    public string link { get; set; }
+    public string Link { get; set; }
 
     public int CuposDisponibles 
     { 
@@ -37,6 +38,7 @@ public class Clase
         owner = _usuario;
         Fecha = DateTime.Parse(_fechaInicio);
         Hora = _horaInicio;
+        Link = $"www.classlink.com/{Nombre.Replace(" ", "_").ToLower()}";
     }
 
     public void AgregarUsuario(Usuario usuarioAAgregar)
