@@ -1,6 +1,7 @@
 ﻿using Cliente;
 using Common;
 using System;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -14,6 +15,9 @@ public class Client
 
     static readonly SettingManager settingsMgr = new SettingManager();
 
+    static Socket? _socket;
+    static NetworkDataHelper? _ndh;
+
     static void StartingMenu()
     {
         Console.WriteLine("\nWelcome to the Client Application");
@@ -22,6 +26,7 @@ public class Client
         Console.WriteLine("3. Exit");
         Console.Write("Choose an option: ");
     }
+
     static void PrintMenu()
     {
         Console.WriteLine("\nMenu:");
@@ -38,12 +43,10 @@ public class Client
     {
         Console.WriteLine("Starting Client Aplicaction ... ");
 
-        Socket clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-
-        IPAddress ClientIp = IPAddress.Parse(settingsMgr.ReadSetting(ClientConfig.ClientIpConfigKey));
-        int ClientPort = int.Parse(settingsMgr.ReadSetting(ClientConfig.ClientPortConfigKey));
-        IPEndPoint clientEndPoint = new IPEndPoint(ClientIp, ClientPort);
-        clientSocket.Bind(clientEndPoint);
+        var clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        clientSocket.ReceiveTimeout = 10000;
+        clientSocket.SendTimeout = 10000;
+        clientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 
         IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
         int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
@@ -62,24 +65,29 @@ public class Client
 
         Console.WriteLine("\nConnected to server");
 
+        _socket = clientSocket;
+        var networkDataHelper = new NetworkDataHelper(clientSocket);
+        _ndh = networkDataHelper;
+
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; GracefulExit(); };
+        AppDomain.CurrentDomain.ProcessExit += (_, __) => { GracefulExit(); };
+
         bool running = true;
-        NetworkDataHelper networkDataHelper = new NetworkDataHelper(clientSocket);
 
         while (running)
         {
             while (!loggedIn && running)
             {
                 StartingMenu();
-                string option = Console.ReadLine();
+                string? option = Console.ReadLine();
                 int commandNum = -1;
 
                 try
                 {
-                    commandNum = int.Parse(option) - 1;
+                    commandNum = int.Parse(option ?? string.Empty) - 1;
                 }
                 catch
                 {
-
                     Console.WriteLine("\nInvalid option. Please try again.");
                     continue;
                 }
@@ -90,6 +98,9 @@ public class Client
                     running = false;
                     break;
                 }
+
+                if (!clientSocket.Connected) { running = false; break; }
+
                 byte[] messegeType = Encoding.UTF8.GetBytes(Protocol.request);
                 string commandString = ((int)command).ToString("D2");
                 byte[] commandBytes = Encoding.UTF8.GetBytes(commandString);
@@ -99,11 +110,9 @@ public class Client
                     networkDataHelper.Send(messegeType);
                     networkDataHelper.Send(commandBytes);
                 }
-                catch (SocketException)
-                {
-                    running = false;
-                    break;
-                }
+                catch (SocketException) { running = false; break; }
+                catch (ObjectDisposedException) { running = false; break; }
+                catch (IOException) { running = false; break; }
 
                 switch (command)
                 {
@@ -122,20 +131,22 @@ public class Client
             while (loggedIn && running)
             {
                 PrintMenu();
-                string option = Console.ReadLine();
+                string? option = Console.ReadLine();
                 int commandNum = -1;
                 try
                 {
-                    commandNum = int.Parse(option) - 1;
+                    commandNum = int.Parse(option ?? string.Empty) - 1;
                 }
                 catch
                 {
-
                     Console.WriteLine("\nInvalid option. Please try again.");
                     continue;
                 }
 
                 CommandLogged command = (CommandLogged)commandNum;
+
+                if (!clientSocket.Connected) { running = false; break; }
+
                 byte[] messegeType = Encoding.UTF8.GetBytes(Protocol.request);
                 string commandString = ((int)command).ToString("D2");
                 byte[] commandBytes = Encoding.UTF8.GetBytes(commandString);
@@ -145,11 +156,9 @@ public class Client
                     networkDataHelper.Send(messegeType);
                     networkDataHelper.Send(commandBytes);
                 }
-                catch (SocketException)
-                {
-                    running = false;
-                    break;
-                }
+                catch (SocketException) { running = false; break; }
+                catch (ObjectDisposedException) { running = false; break; }
+                catch (IOException) { running = false; break; }
 
                 switch (command)
                 {
@@ -171,40 +180,98 @@ public class Client
                     case CommandLogged.Exit:
                         running = Logout(networkDataHelper);
                         break;
-
                     default:
                         Console.WriteLine("Invalid option.");
                         break;
                 }
-
             }
-            
         }
+
         Console.WriteLine("\nConection interrupted...");
-        clientSocket.Shutdown(SocketShutdown.Both);
-        clientSocket.Close();
+        try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
+        try { clientSocket.Close(); } catch { }
     }
+
+    static void GracefulExit()
+    {
+        try
+        {
+            if (loggedIn && _ndh != null && _socket != null && _socket.Connected)
+            {
+                byte[] len0 = BitConverter.GetBytes(0);
+                int prev = _socket.ReceiveTimeout;
+                try
+                {
+                    _ndh.Send(len0);
+                    _socket.ReceiveTimeout = 1500;
+                    try { _ndh.Receive(1); } catch { }
+                }
+                finally
+                {
+                    if (_socket != null) _socket.ReceiveTimeout = prev;
+                }
+            }
+        }
+        catch { }
+        try { _socket?.Shutdown(SocketShutdown.Both); } catch { }
+        try { _socket?.Close(); } catch { }
+    }
+
     internal static bool Logout(NetworkDataHelper networkDataHelper)
     {
         try
         {
             byte[] len0 = BitConverter.GetBytes(0);
             networkDataHelper.Send(len0);
-            byte[] result = networkDataHelper.Receive(1);
-            bool ok = BitConverter.ToBoolean(result);
-            if (ok)
+
+            var s = _socket;
+            if (s != null)
             {
-                Console.WriteLine("Logged out successfully.");
-                Client.loggedIn = false;
-                userLogged = null;
+                int prev = s.ReceiveTimeout;
+                try
+                {
+                    s.ReceiveTimeout = 2000;
+                    byte[] result = networkDataHelper.Receive(1);
+                    bool ok = BitConverter.ToBoolean(result);
+                    if (ok)
+                    {
+                        Console.WriteLine("Logged out successfully.");
+                        loggedIn = false;
+                        userLogged = null;
+                    }
+                    else
+                    {
+                        Console.WriteLine("Logout failed, try again.");
+                    }
+                }
+                catch
+                {
+                    loggedIn = false;
+                    userLogged = null;
+                }
+                finally
+                {
+                    if (s != null) s.ReceiveTimeout = prev;
+                }
             }
             else
             {
-                Console.WriteLine("Logout failed, try again.");
+                loggedIn = false;
+                userLogged = null;
             }
             return true;
         }
         catch (SocketException)
+        {
+            Console.WriteLine("Connection lost to server.");
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            Console.WriteLine("Connection lost to server.");
+            return false;
+        }
+        catch (IOException)
         {
             Console.WriteLine("Connection lost to server.");
             return false;
@@ -215,11 +282,9 @@ public class Client
     {
         try
         {
-            // Enviamos longitud cero porque no hay datos adicionales para este comando
             byte[] len0 = BitConverter.GetBytes(0);
             networkDataHelper.Send(len0);
 
-            //primero recivo la cantidad de clases
             byte[] classCountBytes = networkDataHelper.Receive(4);
             int classCount = BitConverter.ToInt32(classCountBytes);
             if (classCount == 0)
@@ -240,6 +305,16 @@ public class Client
             return true;
         }
         catch (SocketException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (IOException)
         {
             Console.WriteLine("\nConnection lost to server.");
             return false;
@@ -290,6 +365,16 @@ public class Client
             Console.WriteLine("\nConnection lost to server.");
             return false;
         }
+        catch (ObjectDisposedException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (IOException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
     }
 
     internal static bool LogIn(NetworkDataHelper networkDataHelper)
@@ -323,18 +408,27 @@ public class Client
             if (ok)
             {
                 Console.WriteLine("\nLogged in successfully.");
-                Client.loggedIn = true;
+                loggedIn = true;
                 userLogged = userName;
             }
             else
             {
                 Console.WriteLine("\nLogin failed, incorrect username or password.");
                 return true;
-
             }
             return true;
         }
         catch (SocketException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (IOException)
         {
             Console.WriteLine("\nConnection lost to server.");
             return false;
@@ -379,10 +473,6 @@ public class Client
         {
             classStartDate = DateTime.Now.ToString("dd/MM/yyyy");
             Console.WriteLine("Default date applied: " + classStartDate);
-        } 
-        else
-        {
-            // Agregar validación de formato de fecha
         }
 
         Console.Write("Enter class start time (HH:MM): ");
@@ -391,10 +481,6 @@ public class Client
         {
             Console.WriteLine("\nClass start time cannot be null");
             return true;
-        }
-        else
-        {
-            // Agregar validación de formato de hora
         }
 
         Console.Write("Enter class duration (in minutes): ");
@@ -485,6 +571,16 @@ public class Client
             return true;
         }
         catch (SocketException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        catch (IOException)
         {
             Console.WriteLine("\nConnection lost to server.");
             return false;

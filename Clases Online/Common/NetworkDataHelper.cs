@@ -1,44 +1,123 @@
+using System;
+using System.IO;
 using System.Net.Sockets;
-namespace Common;
 
-public class NetworkDataHelper
+namespace Common
 {
-    public readonly Socket _socket;
-    
-    public NetworkDataHelper(Socket socket){
-        _socket = socket;
-    }
-
-    public byte[] Receive(int lenght)
+    public class NetworkDataHelper
     {
-        byte[] buffer = new byte[lenght];
-        int offset = 0;
-        
-        while (offset < lenght)
+        public readonly Socket _socket;
+
+        public NetworkDataHelper(Socket socket)
         {
-            int bytesRead = _socket.Receive(buffer, offset, lenght - offset, SocketFlags.None);
-            if (bytesRead == 0)
+            _socket = socket ?? throw new ArgumentNullException(nameof(socket));
+            _socket.Blocking = true;
+        }
+        public byte[] Receive(int length)
+        {
+            if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
+            var buffer = new byte[length];
+            int offset = 0;
+
+            while (offset < length)
             {
-                throw new Exception("Connection closed by remote host");
+                EnsureConnectedOrThrow();
+
+                int bytesRead;
+                try
+                {
+                    bytesRead = _socket.Receive(buffer, offset, length - offset, SocketFlags.None);
+                }
+                catch (SocketException) { throw; }
+                catch (ObjectDisposedException) { throw; }
+                catch (IOException) { throw; }
+
+                if (bytesRead == 0)
+                {
+                    throw new SocketException((int)SocketError.ConnectionReset);
+                }
+
+                offset += bytesRead;
             }
-            offset += bytesRead;
+            return buffer;
         }
 
-        return buffer;
-    }
-
-    public void Send(byte[] buffer)
-    {
-        int length = buffer.Length;
-        int offset = 0;
-        while(offset < length)
+        public void Send(byte[] buffer)
         {
-            int bytesSent = _socket.Send(buffer, offset, length - offset, SocketFlags.None);
-            if (bytesSent == 0)
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            int length = buffer.Length;
+            int offset = 0;
+
+            while (offset < length)
             {
-                throw new Exception("Connection closed by remote host");
+                EnsureConnectedOrThrow();
+
+                int bytesSent;
+                try
+                {
+                    bytesSent = _socket.Send(buffer, offset, length - offset, SocketFlags.None);
+                }
+                catch (SocketException) { throw; }
+                catch (ObjectDisposedException) { throw; }
+                catch (IOException) { throw; }
+
+                if (bytesSent == 0)
+                {
+                    throw new SocketException((int)SocketError.ConnectionReset);
+                }
+
+                offset += bytesSent;
             }
-            offset += bytesSent;
+        }
+
+        public byte[] ReceiveWithTimeout(int length, int msTimeout)
+        {
+            if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
+            if (msTimeout < 0) throw new ArgumentOutOfRangeException(nameof(msTimeout));
+
+            int prev = _socket.ReceiveTimeout;
+            try
+            {
+                _socket.ReceiveTimeout = msTimeout;
+                return Receive(length);
+            }
+            finally
+            {
+                try { _socket.ReceiveTimeout = prev; } catch {  }
+            }
+        }
+
+        public bool IsConnected
+        {
+            get
+            {
+                try
+                {
+                    if (_socket == null) return false;
+                    if (!_socket.Connected) return false;
+
+                    bool read = _socket.Poll(0, SelectMode.SelectRead);
+                    bool noData = _socket.Available == 0;
+                    if (read && noData) return false;
+
+                    return true;
+                }
+                catch { return false; }
+            }
+        }
+
+        public void CloseGracefully()
+        {
+            try { _socket.Shutdown(SocketShutdown.Both); } catch { }
+            try { _socket.Close(); } catch { }
+        }
+
+        private void EnsureConnectedOrThrow()
+        {
+            if (!IsConnected)
+            {
+                throw new SocketException((int)SocketError.NotConnected);
+            }
         }
     }
 }
