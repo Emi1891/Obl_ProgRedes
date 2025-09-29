@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using Common;
@@ -23,7 +24,7 @@ namespace Server
         static readonly List<Usuario> users = new List<Usuario>();
         static readonly object usersLock = new object();
 
-        static readonly List<Clase> clases = new List<Clase>();
+        static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
 
 
@@ -35,11 +36,11 @@ namespace Server
             // Clases de ejemplo creadas por el usuario base
             var usuarioBase = users.First(u => u.nombre == "1");
             string today = DateTime.Now.ToString("yyyy-MM-dd");
-            clases.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
-            clases.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
-            clases.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
-            clases.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
-            clases.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
+            classes.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
+            classes.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
+            classes.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
+            classes.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
+            classes.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
 
             Console.WriteLine("Starting Server Application ... ");
 
@@ -80,8 +81,6 @@ namespace Server
                 var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
                 clientThread.Start();
             }
-
-            // (no se llega; si necesitás cierre controlado, agregá una señal externa)
             // serverSocket.Close();
         }
 
@@ -96,7 +95,7 @@ namespace Server
             {
                 while (connected)
                 {
-                    // --- Bucle previo al login ---
+                    // While previo al login
                     while (!clientLogged && connected)
                     {
                         try
@@ -135,7 +134,7 @@ namespace Server
                         }
                     }
 
-                    // --- Bucle con cliente logueado ---
+                    // While con cliente logueado
                     while (clientLogged && connected)
                     {
                         try
@@ -156,7 +155,8 @@ namespace Server
                                     HandleCreateClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.JoinClass:
-                                    // TODO: HandleJoinClass(networkDataHelper, commandData);
+                                    Console.WriteLine("Llego a JoinClass");
+                                    HandleJoinClass(networkDataHelper);
                                     break;
                                 case CommandLogged.ListClasses:
                                     HandleListClasses(networkDataHelper, commandData);
@@ -325,17 +325,21 @@ namespace Server
 
         static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
         {
-            //Primero enviamos la cantidad de clases
+            // Primero enviamos la cantidad de clases
                     Console.WriteLine("envio la cantidad de clases");
 
-            //Luego enviamos cada clase
+            // Luego enviamos cada clase
             try
             {
                 lock (clasesLock)
                 {
-                    foreach (var clase in clases)
+
+                    int cantClases = classes.Count;
+                    byte[] cantClasesBytes = BitConverter.GetBytes(cantClases);
+                    networkDataHelper.Send(cantClasesBytes);
+                    foreach (var clase in classes)
                     {
-                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
+                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
                         byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                         byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
                         networkDataHelper.Send(claseInfoLengthBytes);
@@ -391,7 +395,7 @@ namespace Server
             return validUser;
         }
 
-        // Cliente envía: name|desc|quota|yyyy-MM-dd|HH:mm|dur|hasImg|user
+        // Cliente envia: name|desc|quota|yyyy-MM-dd|HH:mm|dur|hasImg|user
         static bool HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
@@ -411,6 +415,7 @@ namespace Server
             string hasImg = p[6];
             string user = p[7];
             string imgUrl = "";
+            // Falta agregar link a la clase
 
             if (!okQuota || !okDur)
             {
@@ -432,7 +437,7 @@ namespace Server
             bool created = false;
             lock (clasesLock)
             {
-                bool exists = clases.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
+                bool exists = classes.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
                 if (!exists)
                 {
                     if (hasImg == "y")
@@ -495,13 +500,78 @@ namespace Server
                     }
                     var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime);
                     if (imgUrl != "") nueva.UrlFoto = imgUrl;
-                    clases.Add(nueva);
+                    classes.Add(nueva);
                     created = true;
                 }
             }
 
             dataHelper.Send(BitConverter.GetBytes(created));
             return created;
+        }
+
+        static void HandleJoinClass(NetworkDataHelper networkDataHelper)
+        {
+            bool joined = false;
+
+            try
+            {
+                lock (clasesLock)
+                {
+                    int classCoutner = 0;
+                    foreach (var c in classes)
+                    {
+                        if (c.CuposDisponibles > 0)
+                        {
+                            classCoutner++;
+                        }
+                    }
+                    networkDataHelper.Send(BitConverter.GetBytes(classCoutner));
+
+                    foreach (var c in classes)
+                    {
+                        if (c.CuposDisponibles > 0)
+                        {
+                            string classInfo = $"{c.Nombre}|{c.CuposMaximos - c.CuposDisponibles}|{c.CuposMaximos}"; // nombre | cuposOcupados | cuposTotales
+                            byte[] classInfoBytes = Encoding.UTF8.GetBytes(classInfo);
+                            byte[] classInfoLengthBytes = BitConverter.GetBytes(classInfoBytes.Length);
+                            networkDataHelper.Send(classInfoLengthBytes);
+                            networkDataHelper.Send(classInfoBytes);
+                        }
+                    }
+                }
+                byte[] classAndUserNameLengthBytes = networkDataHelper.Receive(4);
+
+                int namesLength = BitConverter.ToInt32(classAndUserNameLengthBytes);
+                byte[] classAndUserNameBytes = networkDataHelper.Receive(namesLength);
+                
+                string classAndUserName = Encoding.UTF8.GetString(classAndUserNameBytes);
+                string[] names = classAndUserName.Split('|');
+                string className = names[0];
+                string userName = names[1];
+                
+                Usuario userToEnroll = users.Find(u => u.nombre == userName);
+                Clase desiredClass = classes.Find(c => c.Nombre == className);
+                
+                lock (clasesLock)
+                {
+                    if (desiredClass.CuposDisponibles > 0 && !desiredClass.usuarios.Any(u => u.nombre == userName))
+                    {
+                        classes.Find(c => c.Nombre == className).AgregarUsuario(userToEnroll);
+                        joined = true;
+                        Console.WriteLine($"User {userName} joined class {className}.");
+                    }
+                }
+
+                networkDataHelper.Send(BitConverter.GetBytes(joined));
+            }
+            catch (SocketException se)
+            {
+                Console.WriteLine($"Client disconnected due to a socket error: {se.Message}");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Unexpected error: {e.Message}");
+            }
         }
     }
 }
