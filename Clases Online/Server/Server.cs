@@ -468,7 +468,6 @@ namespace Server
             string user = p[7];
             string imgUrl = "";
             string link = $"www.classlink.com/{name.Replace(" ", "_").ToLower()}";
-            // Falta agregar link a la clase
 
             if (!okQuota || !okDur)
             {
