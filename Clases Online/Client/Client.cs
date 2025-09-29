@@ -20,7 +20,7 @@ public class Client
         Console.WriteLine("1. Register");
         Console.WriteLine("2. Login");
         Console.WriteLine("3. Exit");
-        Console.Write("Choose an option: ");
+        Console.Write("\nChoose an option: ");
     }
     static void PrintMenu()
     {
@@ -31,7 +31,7 @@ public class Client
         Console.WriteLine("4. Leave Class");
         Console.WriteLine("5. History");
         Console.WriteLine("6. Logout");
-        Console.Write("Choose an option: ");
+        Console.Write("\nChoose an option: ");
     }
 
     static void Main(string[] args)
@@ -157,7 +157,7 @@ public class Client
                         running = CreateClass(networkDataHelper);
                         break;
                     case CommandLogged.JoinClass:
-                        Console.WriteLine("Not implemented yet.");
+                        running = JoinClass(networkDataHelper); // No se por que se iguala a running
                         break;
                     case CommandLogged.ListClasses:
                         running = ListClasses(networkDataHelper);
@@ -343,8 +343,93 @@ public class Client
 
     public static bool JoinClass(NetworkDataHelper networkDataHelper)
     {
-        Console.WriteLine("Not implemented yet.");
-        return true;
+        byte[] len0 = BitConverter.GetBytes(0);
+        networkDataHelper.Send(len0);
+
+        bool joined = false;
+        byte[] classCounterBytes = networkDataHelper.Receive(4);
+
+        int classCounter = BitConverter.ToInt32(classCounterBytes);
+        int classNumber = 0;
+        List<string[]> listedClasses = new List<string[]>();
+
+        Console.WriteLine("\nAviable classes to enroll:\n");
+        for (int i = 0; i < classCounter; i++)
+        {
+            classNumber++;
+
+            byte[] classInfoLengthBytes = networkDataHelper.Receive(4);
+
+            int classInfoLength = BitConverter.ToInt32(classInfoLengthBytes);
+            
+            byte[] classInfoBytes = networkDataHelper.Receive(classInfoLength);
+            
+            string classInfo = Encoding.UTF8.GetString(classInfoBytes);
+
+            string[] classInfoSplit = classInfo.Split('|');
+            string className = classInfoSplit[0];
+            string quotaOccupied = classInfoSplit[1];
+            string totalQuota = classInfoSplit[2];
+            string[] aux = { classNumber.ToString(), className };
+            listedClasses.Add(aux);
+
+            Console.WriteLine($"{classNumber}. {className} ({quotaOccupied}/{totalQuota})");
+        }
+        
+        Console.WriteLine($"\n{classNumber + 1}. Go back");
+
+        if (classCounter == 0)
+        {
+            Console.WriteLine("\nNo classes aviable.");
+            return false;
+        }
+        else
+        {
+            Console.Write("\nChoose an option: ");
+            try
+            {
+                int chosenClass = int.Parse(Console.ReadLine());
+                if (chosenClass == classCounter + 1)
+                {
+                    return true;
+                }
+                if (chosenClass > classCounter || chosenClass < 1)
+                {
+                    Console.WriteLine("\nInvalid input. Number out of range.");
+                    return true;
+                }
+
+                string selectedClassName = listedClasses.Find(c => int.Parse(c[0]) == chosenClass)[1];
+                string classAndUserName = selectedClassName + $"|{userLogged}";
+
+                byte[] classAndUserNameBytes = Encoding.UTF8.GetBytes(classAndUserName);
+                byte[] classAndUserNameBytesLength = BitConverter.GetBytes(classAndUserNameBytes.Length);
+
+                networkDataHelper.Send(classAndUserNameBytesLength);
+                networkDataHelper.Send(classAndUserNameBytes);
+
+                joined = BitConverter.ToBoolean(networkDataHelper.Receive(1));
+                if (joined)
+                {
+                    Console.WriteLine($"\nYou have successfully joined the class: {selectedClassName}");
+                } 
+                else
+                {
+                    Console.WriteLine($"\nCould not join the class: {selectedClassName}. It may be full or you are already enrolled.");
+                }
+                return true;
+            }
+            catch (SocketException se)
+            {
+                Console.WriteLine($"\nConnection lost to server.");
+                return false;
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"\nInvalid input, try again. ({e.Message})");
+                return true;
+            }
+        }
     }
 
     public static bool CreateClass(NetworkDataHelper networkDataHelper)

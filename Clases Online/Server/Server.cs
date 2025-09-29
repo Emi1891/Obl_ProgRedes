@@ -36,11 +36,11 @@ namespace Server
             // Clases de ejemplo creadas por el usuario base
             var usuarioBase = users.First(u => u.nombre == "1");
             string today = DateTime.Now.ToString("yyyy-MM-dd");
-            clases.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
-            clases.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
-            clases.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
-            clases.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
-            clases.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
+            classes.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
+            classes.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
+            classes.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
+            classes.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
+            classes.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
 
             Console.WriteLine("Starting Server Application ... ");
 
@@ -81,8 +81,6 @@ namespace Server
                 var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
                 clientThread.Start();
             }
-
-            // (no se llega; si necesitás cierre controlado, agregá una señal externa)
             // serverSocket.Close();
         }
 
@@ -157,7 +155,8 @@ namespace Server
                                     HandleCreateClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.JoinClass:
-                                    HandleJoinClass(networkDataHelper, commandData);
+                                    Console.WriteLine("Llego a JoinClass");
+                                    HandleJoinClass(networkDataHelper);
                                     break;
                                 case CommandLogged.ListClasses:
                                     Console.WriteLine("Llego a ListClasses");
@@ -200,7 +199,7 @@ namespace Server
             }
         }
 
-        // --- Comandos ---
+        // Comandos
         static void HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
 
@@ -214,10 +213,10 @@ namespace Server
 
         static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
         {
-            //Primero enviamos la cantidad de clases
+            // Primero enviamos la cantidad de clases
                     Console.WriteLine("envio la cantidad de clases");
 
-            //Luego enviamos cada clase
+            // Luego enviamos cada clase
             try
             {
 
@@ -225,12 +224,12 @@ namespace Server
                 lock (clasesLock)
                 {
 
-                    int cantClases = clases.Count;
+                    int cantClases = classes.Count;
                     byte[] cantClasesBytes = BitConverter.GetBytes(cantClases);
                     networkDataHelper.Send(cantClasesBytes);
-                    foreach (var clase in clases)
+                    foreach (var clase in classes)
                     {
-                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
+                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
                         byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                         byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
                         networkDataHelper.Send(claseInfoLengthBytes);
@@ -389,7 +388,8 @@ namespace Server
                             Console.WriteLine("SERVER CAYO EN EXCEPTION: "+ e.Message);
                         }
                     }
-                    var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime, imgUrl);
+                    var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime);
+                    if (imgUrl != "") nueva.UrlFoto = imgUrl;
                     classes.Add(nueva);
                     created = true;
                 }
@@ -399,32 +399,69 @@ namespace Server
             return created;
         }
 
-        static void HandleJoinClass(NetworkDataHelper networkDataHelper, byte[] data)
+        static void HandleJoinClass(NetworkDataHelper networkDataHelper)
         {
             bool joined = false;
-            bool allClassesSent = false;
-            List<string> classesToSend = new List<string>();
-            lock (clasesLock) {
-                foreach (var c in classes)
+
+            try
+            {
+                lock (clasesLock)
                 {
-                    try
+                    int classCoutner = 0;
+                    foreach (var c in classes)
                     {
-                        byte[] nameBuffer = Encoding.UTF8.GetBytes(c.Nombre);
-                        networkDataHelper.Send(nameBuffer);
+                        if (c.CuposDisponibles > 0)
+                        {
+                            classCoutner++;
+                        }
                     }
-                    catch (SocketException se)
+                    networkDataHelper.Send(BitConverter.GetBytes(classCoutner));
+
+                    foreach (var c in classes)
                     {
-                        // Manejar excepcion
-                    }
-                    catch (Exception e)
-                    {
-                        // Manejar excepcion
+                        if (c.CuposDisponibles > 0)
+                        {
+                            string classInfo = $"{c.Nombre}|{c.CuposMaximos - c.CuposDisponibles}|{c.CuposMaximos}"; // nombre | cuposOcupados | cuposTotales
+                            byte[] classInfoBytes = Encoding.UTF8.GetBytes(classInfo);
+                            byte[] classInfoLengthBytes = BitConverter.GetBytes(classInfoBytes.Length);
+                            networkDataHelper.Send(classInfoLengthBytes);
+                            networkDataHelper.Send(classInfoBytes);
+                        }
                     }
                 }
-                networkDataHelper.Send(BitConverter.GetBytes(allClassesSent));
-            }
+                byte[] classAndUserNameLengthBytes = networkDataHelper.Receive(4);
 
-            networkDataHelper.Send(BitConverter.GetBytes(joined));
+                int namesLength = BitConverter.ToInt32(classAndUserNameLengthBytes);
+                byte[] classAndUserNameBytes = networkDataHelper.Receive(namesLength);
+                
+                string classAndUserName = Encoding.UTF8.GetString(classAndUserNameBytes);
+                string[] names = classAndUserName.Split('|');
+                string className = names[0];
+                string userName = names[1];
+                
+                Usuario userToEnroll = users.Find(u => u.nombre == userName);
+                Clase desiredClass = classes.Find(c => c.Nombre == className);
+                
+                lock (clasesLock)
+                {
+                    if (desiredClass.CuposDisponibles > 0 && !desiredClass.usuarios.Any(u => u.nombre == userName))
+                    {
+                        classes.Find(c => c.Nombre == className).AgregarUsuario(userToEnroll);
+                        joined = true;
+                        Console.WriteLine($"User {userName} joined class {className}.");
+                    }
+                }
+
+                networkDataHelper.Send(BitConverter.GetBytes(joined));
+            }
+            catch (SocketException se)
+            {
+                Console.WriteLine($"Client disconnected due to a socket error: {se.Message}");
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Unexpected error: {e.Message}");
+            }
         }
     }
 }
