@@ -25,7 +25,7 @@ namespace Server
         static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
 
-        private static bool running = true;
+        static volatile bool running = true;
 
 
         static void Main(string[] args)
@@ -44,23 +44,6 @@ namespace Server
 
             Console.WriteLine("\nPress 'q' and 'Enter' at any time while not handling a client to stop the server.\n");
 
-            Thread keyListener = new Thread(() =>
-            {
-                while (running)
-                {
-                    string? input = Console.ReadLine();
-                    if (input != null && input.ToLower() == "q")
-                    {
-                        Console.WriteLine("\nCierre solicitado.\n");
-                        running = false;
-                    }
-
-                    Thread.Sleep(100);
-                }
-            });
-            keyListener.IsBackground = true;
-            keyListener.Start();
-
             var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
@@ -71,32 +54,64 @@ namespace Server
             serverSocket.Listen();
             Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
-            while (running)
+            Thread keyListener = new Thread(() =>
             {
-                Socket clientSocket = serverSocket.Accept();
-
-                bool admit;
-                lock (clientThreadsLock)
+                while (running)
                 {
-                    admit = currentClients < maxClientsAllowed;
-                    if (admit) currentClients++;
-                }
+                    string? input = Console.ReadLine();
+                    if (input != null && input.ToLower() == "q")
+                    {
+                        Console.WriteLine("\nCierre solicitado.\n");
+                        running = false;
+                        try
+                        {
+                            serverSocket.Close();
+                        }
+                        catch
+                        {
+                            Console.WriteLine("Unexpexted socket error while shutting the server down.");
+                        }
+                    }
 
-                if (!admit)
+                    Thread.Sleep(100);
+                }
+            });
+            keyListener.IsBackground = true;
+            keyListener.Start();
+
+            try
+            {
+                while (running)
                 {
-                    try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
-                    clientSocket.Close();
-                    continue;
+                    Socket clientSocket = serverSocket.Accept();
+
+                    bool admit;
+                    lock (clientThreadsLock)
+                    {
+                        admit = currentClients < maxClientsAllowed;
+                        if (admit) currentClients++;
+                    }
+
+                    if (!admit)
+                    {
+                        try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
+                        clientSocket.Close();
+                        continue;
+                    }
+
+                    int clientNum = currentClients;
+                    Console.WriteLine($"Client connected. Current clients: {currentClients}");
+
+                    var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
+                    clientThread.Start();
                 }
-
-                int clientNum = currentClients;
-                Console.WriteLine($"Client connected. Current clients: {currentClients}");
-
-                var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
-                clientThread.Start();
+                serverSocket.Shutdown(SocketShutdown.Both);
+                serverSocket.Close();
             }
-            serverSocket.Shutdown(SocketShutdown.Both);
-            serverSocket.Close();
+            catch (SocketException se)
+            {
+                Console.WriteLine("Server closed correctly.");
+            }
         }
 
         static void HandleClient(Socket clientSocket, int clientNum)
@@ -204,8 +219,11 @@ namespace Server
             }
             finally
             {
-                try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
-                clientSocket.Close();
+                try { 
+                    clientSocket.Shutdown(SocketShutdown.Both);
+                    clientSocket.Close();
+                } catch { }
+                
                 lock (clientThreadsLock) { currentClients--; }
                 Console.WriteLine($"Client {clientNum} disconnected. Current clients: {currentClients}");
             }
