@@ -484,5 +484,4 @@ $RECYCLE.BIN/
 *.swp
 
 #Extra
-bin/
 obj/
