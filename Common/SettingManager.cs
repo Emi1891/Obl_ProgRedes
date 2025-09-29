@@ -1,3 +1,5 @@
+using System.Configuration;
+
 namespace Common;
 
 public class SettingManager
