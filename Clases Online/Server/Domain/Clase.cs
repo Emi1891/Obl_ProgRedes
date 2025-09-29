@@ -15,7 +15,7 @@ public class Clase
     public DateTime Fecha { get; set; }
     public string Hora { get; set; }
     public List<Usuario> usuarios { get; set; } = new List<Usuario>();
-    public string? UrlFoto { get; set; } = "";
+    public string? UrlFoto { get; set; } = "No image uploaded";
     public int Duracion { get; set; }
     public Usuario owner { get; set; }
     public string link { get; set; }

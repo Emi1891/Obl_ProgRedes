@@ -214,7 +214,7 @@ namespace Server
             Clase? clase = null;
             lock (clasesLock)
             {
-                clase = clases.FirstOrDefault(c => c.Nombre == className);
+                clase = classes.FirstOrDefault(c => c.Nombre == className);
             }
 
             try
@@ -262,6 +262,7 @@ namespace Server
 
             }
         }
+
         static void showClasesOfTheClient(NetworkDataHelper networkDataHelper)
         {
             //primero recivimos que usuario es
@@ -290,7 +291,7 @@ namespace Server
 
             lock (clasesLock)
             {
-                foreach (Clase c in clases)
+                foreach (Clase c in classes)
         {
                     if (c.usuarios.Contains(usuarioLogeado)) { cantClases++; clasesUsuario.Add(c); }
                 }
@@ -304,7 +305,8 @@ namespace Server
             {
                 foreach (var clase in clasesUsuario)
                 {
-                    string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
+                    // nombre|descripcion|cuposOcupados/cuposTotales|yyyy-MM-dd|HH:mm|duracion|imgUrl|owner
+                    string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
                     byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                     byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
                     networkDataHelper.Send(claseInfoLengthBytes);
@@ -314,8 +316,9 @@ namespace Server
             catch (Exception e)
             {
                 Console.WriteLine($"Error sending class list: {e.Message}");
+            }
         }
-        }
+
         static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             Console.WriteLine("Client logged out.");
@@ -325,10 +328,6 @@ namespace Server
 
         static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
         {
-            // Primero enviamos la cantidad de clases
-                    Console.WriteLine("envio la cantidad de clases");
-
-            // Luego enviamos cada clase
             try
             {
                 lock (clasesLock)
@@ -339,11 +338,64 @@ namespace Server
                     networkDataHelper.Send(cantClasesBytes);
                     foreach (var clase in classes)
                     {
-                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
+                        // nombre|descripcion|cuposOcupados/cuposTotales|yyyy-MM-dd|HH:mm|duracion|imgUrl|owner
+                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
                         byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                         byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
                         networkDataHelper.Send(claseInfoLengthBytes);
                         networkDataHelper.Send(claseInfoBytes);
+                    }
+                }
+                bool needToSendImg = BitConverter.ToBoolean(networkDataHelper.Receive(1));
+                if (needToSendImg)
+                {
+                    lock (clasesLock)
+                    {
+                        int pathLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
+                        string path = Encoding.UTF8.GetString(networkDataHelper.Receive(pathLength));
+
+                        FileInfo fileInfo = new FileInfo(path);
+
+                        string fileName = fileInfo.Name;
+                        byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+
+                        int fileNameLength = fileNameBytes.Length;
+                        byte[] fileNameLengthBytes = BitConverter.GetBytes(fileNameLength);
+
+                        long fileSize = fileInfo.Length;
+                        byte[] fileSizeBytes = BitConverter.GetBytes(fileSize);
+
+                        networkDataHelper.Send(fileNameLengthBytes);
+                        networkDataHelper.Send(fileNameBytes);
+                        networkDataHelper.Send(fileSizeBytes);
+
+                        long offset = 0;
+                        long partCount = Protocol.CalculateFileParts(fileSize);
+                        long currentPart = 1;
+
+                        FileStreamHelper fileStreamHelper = new FileStreamHelper();
+
+                        while (offset < fileSize)
+                        {
+                            byte[] buffer;
+                            bool isLastPart = currentPart == partCount;
+
+                            if (!isLastPart)
+                            {
+                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                                buffer = fileStreamHelper.Read(path, offset, Protocol.MaxFileChunkSize);
+                                offset += Protocol.MaxFileChunkSize;
+                            }
+                            else
+                            {
+                                long lastPartSize = fileSize - offset;
+                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                                buffer = fileStreamHelper.Read(path, offset, (int)lastPartSize);
+                                offset += lastPartSize;
+                            }
+                            networkDataHelper.Send(buffer);
+                            currentPart++;
+                        }
                     }
                 }
             }
@@ -415,6 +467,7 @@ namespace Server
             string hasImg = p[6];
             string user = p[7];
             string imgUrl = "";
+            string link = $"www.classlink.com/{name.Replace(" ", "_").ToLower()}";
             // Falta agregar link a la clase
 
             if (!okQuota || !okDur)
@@ -434,6 +487,8 @@ namespace Server
                 return false;
             }
 
+            string fileName = "";
+
             bool created = false;
             lock (clasesLock)
             {
@@ -448,8 +503,7 @@ namespace Server
                             int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
 
                             byte[] fileNameBuffer = dataHelper.Receive(fileNameLength);
-                            string fileName = Encoding.UTF8.GetString(fileNameBuffer);
-                            // Se podria agregar una validacion para que no se pueda subir una imagen con el mismo nombre que otra
+                            fileName = Encoding.UTF8.GetString(fileNameBuffer);
 
                             byte[] fileSizeBuffer = dataHelper.Receive(Protocol.FileSizeLenghtSize);
                             long fileSize = BitConverter.ToInt64(fileSizeBuffer);
@@ -488,19 +542,49 @@ namespace Server
                         }
                         catch (SocketException e)
                         {
-                            // Agregar manejo de error
-                            // Ejemplo en repo de clase: clientActive = false;
-                            Console.WriteLine("SERVER CAYO EN SOCKET EXCEPTION: " + e.Message);
+                            Console.WriteLine("Connection to client lost: " + e.Message);
+
+                            string imgPath = Directory.GetCurrentDirectory() + $"/Images/" + fileName;
+                            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+                            {
+                                try
+                                {
+                                    File.Delete(imgPath);
+                                    Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Could not delete incomplete file {fileName} from: {imgPath}. ({ex.Message})");
+                                }
+                            }
+
+                            throw e;
+                            // Lanzo de nuevo la excepcion para que se maneje en HandleClient
                         }
                         catch (Exception e)
                         {
-                            // Agregar manejo de error
-                            Console.WriteLine("SERVER CAYO EN EXCEPTION: "+ e.Message);
+                            Console.WriteLine("Server error: " + e.Message);
+
+                            string imgPath = Directory.GetCurrentDirectory() + $"/Images/" + fileName;
+                            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+                            {
+                                try
+                                {
+                                    File.Delete(imgPath);
+                                    Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Could not delete incomplete file {fileName} from: {imgPath}. ({ex.Message})");
+                                }
+                            }
+
                         }
                     }
-                    var nueva = new Clase(name, desc, dur, quota, owner, startDate, startTime);
-                    if (imgUrl != "") nueva.UrlFoto = imgUrl;
-                    classes.Add(nueva);
+                    var newClass = new Clase(name, desc, dur, quota, owner, startDate, startTime);
+                    newClass.link = link;
+                    if (imgUrl != "") newClass.UrlFoto = imgUrl;
+                    classes.Add(newClass);
                     created = true;
                 }
             }
@@ -558,7 +642,7 @@ namespace Server
                     {
                         classes.Find(c => c.Nombre == className).AgregarUsuario(userToEnroll);
                         joined = true;
-                        Console.WriteLine($"User {userName} joined class {className}.");
+                        Console.WriteLine($"User {userName} joined class '{className}'.");
                     }
                 }
 

@@ -231,26 +231,40 @@ public class Client
             }
             Console.WriteLine($"\nYou are enrolled in {classCount} classes:");
 
-
             for (int i = 0; i < classCount; i++)
             {
                 byte[] classDataLengthBytes = networkDataHelper.Receive(4);
                 int classDataLength = BitConverter.ToInt32(classDataLengthBytes);
                 byte[] classDataBytes = networkDataHelper.Receive(classDataLength);
                 string classData = Encoding.UTF8.GetString(classDataBytes);
-                Console.WriteLine($"\nClass {i + 1}:");
-                Console.WriteLine(classData.Replace("|", "\n"));
+                string[] classDataSplit = classData.Split('|');
+                Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
+                Console.WriteLine($"Description: {classDataSplit[1]}");
+                Console.WriteLine($"Date: {classDataSplit[3]}");
+                Console.WriteLine($"Time: {classDataSplit[4]}");
+                Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
+                Console.WriteLine($"Taken places: {classDataSplit[2]}");
+                Console.WriteLine($"Creator: {classDataSplit[7]}");
+
+                string hasImg = "Yes";
+                if (classDataSplit[6] == "No image uploaded")
+                {
+                    hasImg = "No";
+                }
+
+                Console.WriteLine($"Has cover image: {hasImg}");
             }
+
+            
         }
         catch (SocketException)
         {
             Console.WriteLine("\nConnection lost to server.");
             return false;
         }
-
-
         return true;
     }
+
     internal static bool LeaveClass(NetworkDataHelper networkDataHelper)
     {
         //muestro lista de clases con ListClasses
@@ -375,6 +389,9 @@ public class Client
 
     internal static bool ListClasses(NetworkDataHelper networkDataHelper)
     {
+        string fileName = "";
+        string className = "";
+
         try
         {
             byte[] len0 = BitConverter.GetBytes(0);
@@ -388,30 +405,218 @@ public class Client
                 return true;
             }
             Console.WriteLine($"\nThere are {classCount} classes available:");
+
+            List<string[]> imgUrls = new List<string[]>();
+
             for (int i = 0; i < classCount; i++)
             {
                 byte[] classDataLengthBytes = networkDataHelper.Receive(4);
                 int classDataLength = BitConverter.ToInt32(classDataLengthBytes);
                 byte[] classDataBytes = networkDataHelper.Receive(classDataLength);
                 string classData = Encoding.UTF8.GetString(classDataBytes);
-                Console.WriteLine($"\nClass {i + 1}:");
-                Console.WriteLine(classData.Replace("|", "\n"));
+                string[] classDataSplit = classData.Split('|');
+
+                Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
+                Console.WriteLine($"Description: {classDataSplit[1]}");
+                Console.WriteLine($"Date: {classDataSplit[3]}");
+                Console.WriteLine($"Time: {classDataSplit[4]}");
+                Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
+                Console.WriteLine($"Taken places: {classDataSplit[2]}");
+                Console.WriteLine($"Creator: {classDataSplit[7]}");
+
+                string hasImg = "Yes";
+                if (classDataSplit[6] == "No image uploaded")
+                {
+                    hasImg = "No";
+                }
+
+                Console.WriteLine($"Has cover image: {hasImg}");
+                imgUrls.Add(new string[] { (i + 1).ToString(), classDataSplit[6], classDataSplit[0] });
             }
+
+            bool wantImg = false;
+            Console.Write("\nTo download any cover image, choose the desired class. Otherwise, type 'q': ");
+            string? option = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(option))
+            {
+                Console.WriteLine("\nInvalid input.");
+                networkDataHelper.Send(BitConverter.GetBytes(wantImg));
+                return true;
+            }
+            if (option == "q")
+            {
+                networkDataHelper.Send(BitConverter.GetBytes(wantImg));
+                return true;
+            }
+
+            try
+            {
+                Console.WriteLine($"\nTexto ingresado: {option}");
+
+                int chosenClass = int.Parse(option);
+
+                Console.WriteLine("\nOpcion parseada correctamente");
+                Console.WriteLine($"\nNumero ingresado: {chosenClass}");
+
+                if (chosenClass > classCount || chosenClass < 1)
+                {
+                    Console.WriteLine("\nInvalid input. Number out of range.");
+                    networkDataHelper.Send(BitConverter.GetBytes(wantImg));
+                    return true;
+                }
+                string classPath = imgUrls.Find(c => int.Parse(c[0]) == chosenClass)[1];
+                className = imgUrls.Find(c => int.Parse(c[0]) == chosenClass)[2];
+                if (classPath == "No image uploaded")
+                {
+                    Console.WriteLine("\nThe selected class has no cover image.");
+                    networkDataHelper.Send(BitConverter.GetBytes(wantImg));
+                    return true;
+                }
+
+                wantImg = true;
+
+                Console.WriteLine("Envio al server que quiero la imagen");
+
+                networkDataHelper.Send(BitConverter.GetBytes(wantImg));
+
+                Console.WriteLine("Envio path al server");
+
+                byte[] pathBytes = Encoding.UTF8.GetBytes(classPath);
+                byte[] pathBytesLength = BitConverter.GetBytes(pathBytes.Length);
+                networkDataHelper.Send(pathBytesLength);
+                networkDataHelper.Send(pathBytes);
+
+                Console.WriteLine("Path enviado");
+
+                byte[] fileNameLengthBuffer = networkDataHelper.Receive(Protocol.FileNameLenghtSize);
+                int fileNameLength = BitConverter.ToInt32(fileNameLengthBuffer);
+
+                Console.WriteLine("Largo del nombre recibido");
+
+                byte[] fileNameBuffer = networkDataHelper.Receive(fileNameLength);
+                fileName = Encoding.UTF8.GetString(fileNameBuffer);
+
+                Console.WriteLine("Nombre recibido");
+
+                byte[] fileSizeBuffer = networkDataHelper.Receive(Protocol.FileSizeLenghtSize);
+                long fileSize = BitConverter.ToInt64(fileSizeBuffer);
+
+                Console.WriteLine("Tamano del archivo recivido");
+
+                long offset = 0;
+                long partCount = Protocol.CalculateFileParts(fileSize);
+                long currentPart = 1;
+
+                FileStreamHelper fileStreamHelper = new FileStreamHelper();
+
+                while (offset < fileSize)
+                {
+                    byte[] buffer;
+                    bool isLastPart = currentPart == partCount;
+
+                    if (!isLastPart)
+                    {
+                        Console.WriteLine($"Receiving part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                        buffer = networkDataHelper.Receive(Protocol.MaxFileChunkSize);
+                        offset += Protocol.MaxFileChunkSize;
+                    }
+                    else
+                    {
+                        long lastPartSize = fileSize - offset;
+                        Console.WriteLine($"Receiving part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                        buffer = networkDataHelper.Receive((int)lastPartSize);
+                        offset += lastPartSize;
+                    }
+                    Directory.CreateDirectory($"Images/{className}");
+                    fileStreamHelper.Write($"Images/{className}/" + fileName, buffer);
+                    currentPart++;
+                    // No se si el usuario deberia ver el progreso de descarga
+                }
+
+                string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+                Console.WriteLine($"File {fileName} received successfully at: {imgPath}");
+            }
+            catch (FormatException e) // Tuve que especificar para que funcione el socketexception del otro try catch
+            {
+                Console.WriteLine($"\nInvalid input, try again. ({e.Message})");
+
+                string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+                if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+                {
+                    try
+                    {
+                        File.Delete(imgPath);
+                        Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Could not delete incomplete file {fileName} from: {imgPath}. ({ex.Message})");
+                    }
+                }
+
+                return true;
+            }
+
             return true;
         }
         catch (SocketException)
         {
             Console.WriteLine("\nConnection lost to server.");
+
+            string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+            {
+                try
+                {
+                    File.Delete(imgPath);
+                    Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not delete incomplete file {fileName} from: {imgPath}. ({ex.Message})");
+                }
+            }
+
             return false;
         }
         catch (ObjectDisposedException)
         {
             Console.WriteLine("\nConnection lost to server.");
+
+            string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+            {
+                try
+                {
+                    File.Delete(imgPath);
+                    Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not delete incomplete file {fileName} from: {imgPath}. ({ex.Message})");
+                }
+            }
+
             return false;
         }
         catch (IOException)
         {
             Console.WriteLine("\nConnection lost to server.");
+
+            string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+            {
+                try
+                {
+                    File.Delete(imgPath);
+                    Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Could not delete incomplete file {fileName} from: {imgPath}. ({ex.Message})");
+                }
+            }
+
             return false;
         }
     }
