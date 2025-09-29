@@ -159,7 +159,6 @@ namespace Server
                                     // TODO: HandleJoinClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.ListClasses:
-                                    Console.WriteLine("Llego a ListClasses");
                                     HandleListClasses(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.LeaveClass:
@@ -200,9 +199,122 @@ namespace Server
         }
 
         // --- Comandos ---
-        static void HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
+        static bool HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
+            //primero mostramos todas las clases de la misma forma que en ListClasses
+            showClasesOfTheClient(networkDataHelper);
+            //luego esperamos a que el cliente nos diga cual quiere dejar
+            byte[] classNameLengthBytes = networkDataHelper.Receive(sizeof(int));
+            int classNameLength = BitConverter.ToInt32(classNameLengthBytes);
+            byte[] classNameBytes = networkDataHelper.Receive(classNameLength);
+            string data = Encoding.UTF8.GetString(classNameBytes);
+            string usuarioLoggeado = data.Split('|')[0];
+            string className = data.Split('|')[1];
 
+            Clase? clase = null;
+            lock (clasesLock)
+            {
+                clase = clases.FirstOrDefault(c => c.Nombre == className);
+            }
+
+            try
+            {
+                if (clase == null)
+                {
+                    networkDataHelper.Send(BitConverter.GetBytes(false));
+                    return false;
+                }
+
+                Usuario? usuario = null;
+                lock (usersLock)
+                {
+                    usuario = users.FirstOrDefault(u => u.nombre.Equals(usuarioLoggeado));
+                }
+
+                if (usuario == null)
+                {
+                    networkDataHelper.Send(BitConverter.GetBytes(false));
+                    return false;
+                }
+
+                lock (clasesLock)
+                {
+                    if (clase.usuarios.Contains(usuario)) // me fijo si el ususario esta en la clase
+                    {
+                        clase.usuarios.Remove(usuario); // lo saco de la clase
+                        //le aviso al cliente que se fue de la clase
+                        networkDataHelper.Send(BitConverter.GetBytes(true));
+                        return true;
+                    }
+                    else
+                    {
+                        //le aviso al cliente que no estaba en la clase
+                        networkDataHelper.Send(BitConverter.GetBytes(false));
+                        return false;
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error leaving class: {e.Message}");
+                networkDataHelper.Send(BitConverter.GetBytes(false));
+                return false;
+
+            }
+        }
+        static void showClasesOfTheClient(NetworkDataHelper networkDataHelper)
+        {
+            //primero recivimos que usuario es
+            byte[] userNameLengthBytes = networkDataHelper.Receive(sizeof(int));
+            int userNameLength = BitConverter.ToInt32(userNameLengthBytes);
+            byte[] userNameBytes = networkDataHelper.Receive(userNameLength);
+            string userName = Encoding.UTF8.GetString(userNameBytes);
+
+            Usuario? usuarioLogeado = null;
+            lock (usersLock)
+            {
+                usuarioLogeado = users.FirstOrDefault(u => u.nombre.Equals(userName));
+            }
+
+            if (usuarioLogeado == null)
+            {
+                // Enviamos 0 clases si el usuario no existe
+                byte[] cero = BitConverter.GetBytes(0);
+                networkDataHelper.Send(cero);
+                return;
+            }
+
+            //luego contamos cuantas clases tiene
+            int cantClases = 0;
+            List<Clase> clasesUsuario = new List<Clase>();
+
+            lock (clasesLock)
+            {
+                foreach (Clase c in clases)
+        {
+                    if (c.usuarios.Contains(usuarioLogeado)) { cantClases++; clasesUsuario.Add(c); }
+                }
+            }
+
+            //le enviamos la cantidad de clases
+            byte[] cantClasesBytes = BitConverter.GetBytes(cantClases);
+            networkDataHelper.Send(cantClasesBytes);
+            //luego enviamos cada clase
+            try
+            {
+                foreach (var clase in clasesUsuario)
+                {
+                    string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";
+                    byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
+                    byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
+                    networkDataHelper.Send(claseInfoLengthBytes);
+                    networkDataHelper.Send(claseInfoBytes);
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error sending class list: {e.Message}");
+        }
         }
         static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
@@ -219,14 +331,8 @@ namespace Server
             //Luego enviamos cada clase
             try
             {
-
-
                 lock (clasesLock)
                 {
-
-                    int cantClases = clases.Count;
-                    byte[] cantClasesBytes = BitConverter.GetBytes(cantClases);
-                    networkDataHelper.Send(cantClasesBytes);
                     foreach (var clase in clases)
                     {
                         string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Fecha:HH:mm}|{clase.Duracion}|{clase.owner.nombre}";

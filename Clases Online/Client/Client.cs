@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 
 namespace Client;
 
@@ -47,6 +48,26 @@ public class Client
         clientSocket.ReceiveTimeout = 10000;
         clientSocket.SendTimeout = 10000;
         clientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+
+        // Attempt to bind to a local client endpoint if settings are provided.
+        try
+        {
+            string clientIpStr = settingsMgr.ReadSetting(ClientConfig.ClientIpConfigKey);
+            string clientPortStr = settingsMgr.ReadSetting(ClientConfig.ClientPortConfigKey);
+            if (!string.IsNullOrWhiteSpace(clientIpStr) && !string.IsNullOrWhiteSpace(clientPortStr))
+            {
+                IPAddress clientIp = IPAddress.Parse(clientIpStr);
+                int clientPort = int.Parse(clientPortStr);
+                IPEndPoint clientEndPoint = new IPEndPoint(clientIp, clientPort);
+                clientSocket.Bind(clientEndPoint);
+                Console.WriteLine($"Bound client socket to {clientIp}:{clientPort}");
+            }
+        }
+        catch (Exception ex)
+        {
+            // If bind fails, continue without failing the client. Just log the issue.
+            Console.WriteLine($"Warning: could not bind client socket to local endpoint: {ex.Message}");
+        }
 
         IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
         int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
@@ -172,7 +193,7 @@ public class Client
                         running = ListClasses(networkDataHelper);
                         break;
                     case CommandLogged.LeaveClass:
-                        Console.WriteLine("Not implemented yet.");
+                        running = LeaveClass(networkDataHelper);
                         break;
                     case CommandLogged.History:
                         Console.WriteLine("Not implemented yet.");
@@ -190,6 +211,80 @@ public class Client
         Console.WriteLine("\nConection interrupted...");
         try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
         try { clientSocket.Close(); } catch { }
+    }
+    internal static bool ShowClasesofTheUser(NetworkDataHelper networkDataHelper)
+    {
+        //primero paso el nombre del usuario logueado
+        byte[] nombreUsuario = Encoding.UTF8.GetBytes(userLogged);
+        byte[] nombreUsuarioLength = BitConverter.GetBytes(nombreUsuario.Length);
+        try
+        {
+            networkDataHelper.Send(nombreUsuarioLength);
+            networkDataHelper.Send(nombreUsuario);
+            //luego recibo la cantidad de clases
+            byte[] classCountBytes = networkDataHelper.Receive(4);
+            int classCount = BitConverter.ToInt32(classCountBytes);
+            if (classCount == 0)
+            {
+                Console.WriteLine("\nYou are not enrolled in any classes.");
+                return true;
+            }
+            Console.WriteLine($"\nYou are enrolled in {classCount} classes:");
+
+
+            for (int i = 0; i < classCount; i++)
+            {
+                byte[] classDataLengthBytes = networkDataHelper.Receive(4);
+                int classDataLength = BitConverter.ToInt32(classDataLengthBytes);
+                byte[] classDataBytes = networkDataHelper.Receive(classDataLength);
+                string classData = Encoding.UTF8.GetString(classDataBytes);
+                Console.WriteLine($"\nClass {i + 1}:");
+                Console.WriteLine(classData.Replace("|", "\n"));
+            }
+        }
+        catch (SocketException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+
+
+        return true;
+    }
+    internal static bool LeaveClass(NetworkDataHelper networkDataHelper)
+    {
+        //muestro lista de clases con ListClasses
+        ShowClasesofTheUser(networkDataHelper);
+        Console.Write("\nType the name of the class you want to leave: ");
+        string? className = Console.ReadLine();
+        if (string.IsNullOrWhiteSpace(className))
+        {
+            Console.WriteLine("\nClass name can't be null.");
+            return true;
+        }
+        byte[] commandData = Encoding.UTF8.GetBytes(className);
+        byte[] commandDataLenght = BitConverter.GetBytes(commandData.Length);
+        try
+        {
+            networkDataHelper.Send(commandDataLenght);
+            networkDataHelper.Send(commandData);
+            byte[] result = networkDataHelper.Receive(1);
+            bool ok = BitConverter.ToBoolean(result);
+            if (ok)
+            {
+                Console.WriteLine("\nLeft class successfully.");
+            }
+            else
+            {
+                Console.WriteLine("\nCould not leave class, you might not be enrolled in it.");
+            }
+        }
+        catch (SocketException)
+        {
+            Console.WriteLine("\nConnection lost to server.");
+            return false;
+        }
+        return true;
     }
 
     static void GracefulExit()
