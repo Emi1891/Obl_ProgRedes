@@ -61,7 +61,7 @@ namespace Server
                     string? input = Console.ReadLine();
                     if (input != null && input.ToLower() == "q")
                     {
-                        Console.WriteLine("\nCierre solicitado.\n");
+                        Console.WriteLine("\nShutting server down...\n");
                         running = false;
                         try
                         {
