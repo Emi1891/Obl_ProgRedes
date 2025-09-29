@@ -13,12 +13,10 @@ namespace Server
 {
     internal class Server
     {
-        // --- límites y estado de conexiones ---
         static readonly int maxClientsAllowed = 3;
         static readonly object clientThreadsLock = new object();
         static int currentClients = 0;
 
-        // --- configuración y dominio ---
         static readonly SettingManager settingsMgr = new SettingManager();
 
         static readonly List<Usuario> users = new List<Usuario>();
@@ -27,13 +25,13 @@ namespace Server
         static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
 
+        private static bool running = true;
+
 
         static void Main(string[] args)
         {
-            // Usuario semilla (opcional)
             users.Add(new Usuario("1", "1"));
 
-            // Clases de ejemplo creadas por el usuario base
             var usuarioBase = users.First(u => u.nombre == "1");
             string today = DateTime.Now.ToString("yyyy-MM-dd");
             classes.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
@@ -44,19 +42,36 @@ namespace Server
 
             Console.WriteLine("Starting Server Application ... ");
 
+            Console.WriteLine("\nPress 'q' and 'Enter' at any time while not handling a client to stop the server.\n");
+
+            Thread keyListener = new Thread(() =>
+            {
+                while (running)
+                {
+                    string? input = Console.ReadLine();
+                    if (input != null && input.ToLower() == "q")
+                    {
+                        Console.WriteLine("\nCierre solicitado.\n");
+                        running = false;
+                    }
+
+                    Thread.Sleep(100);
+                }
+            });
+            keyListener.IsBackground = true;
+            keyListener.Start();
+
             var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
             var serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
-            // Bind + Listen
             serverSocket.Bind(serverEndPoint);
             serverSocket.Listen();
             Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
-            // Acepta SIEMPRE, controla cupo por conexión
-            while (true)
+            while (running)
             {
                 Socket clientSocket = serverSocket.Accept();
 
@@ -69,7 +84,6 @@ namespace Server
 
                 if (!admit)
                 {
-                    // opcional: enviar un mensaje breve
                     try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
                     clientSocket.Close();
                     continue;
@@ -81,7 +95,8 @@ namespace Server
                 var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
                 clientThread.Start();
             }
-            // serverSocket.Close();
+            serverSocket.Shutdown(SocketShutdown.Both);
+            serverSocket.Close();
         }
 
         static void HandleClient(Socket clientSocket, int clientNum)
@@ -93,10 +108,9 @@ namespace Server
 
             try
             {
-                while (connected)
+                while (connected && running)
                 {
-                    // While previo al login
-                    while (!clientLogged && connected)
+                    while (!clientLogged && connected && running)
                     {
                         try
                         {
@@ -134,8 +148,7 @@ namespace Server
                         }
                     }
 
-                    // While con cliente logueado
-                    while (clientLogged && connected)
+                    while (clientLogged && connected && running)
                     {
                         try
                         {
@@ -169,7 +182,7 @@ namespace Server
                                     break;
                                 case CommandLogged.Exit:
                                     HandleLogout(networkDataHelper, commandData);
-                                    clientLogged = false; // vuelve al menú inicial del cliente
+                                    clientLogged = false;
                                     break;
                                 default:
                                     Console.WriteLine($"Unknown logged-in command from client {clientNum}: {commandLogged}");
@@ -198,7 +211,6 @@ namespace Server
             }
         }
 
-        // --- Comandos ---
         static bool HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             //primero mostramos todas las clases de la misma forma que en ListClasses
@@ -537,7 +549,7 @@ namespace Server
                             }
 
                             Console.WriteLine($"File {fileName} received successfully.");
-                            imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName; // No se si hace falta guardar la ruta completa pero por las dudas lo dejo asi
+                            imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName;
                         }
                         catch (SocketException e)
                         {
