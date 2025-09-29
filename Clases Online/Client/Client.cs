@@ -49,7 +49,6 @@ public class Client
         clientSocket.SendTimeout = 10000;
         clientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 
-        // Attempt to bind to a local client endpoint if settings are provided.
         try
         {
             string clientIpStr = settingsMgr.ReadSetting(ClientConfig.ClientIpConfigKey);
@@ -65,7 +64,6 @@ public class Client
         }
         catch (Exception ex)
         {
-            // If bind fails, continue without failing the client. Just log the issue.
             Console.WriteLine($"Warning: could not bind client socket to local endpoint: {ex.Message}");
         }
 
@@ -187,7 +185,7 @@ public class Client
                         running = CreateClass(networkDataHelper);
                         break;
                     case CommandLogged.JoinClass:
-                        running = JoinClass(networkDataHelper); // No se por que se iguala a running
+                        running = JoinClass(networkDataHelper);
                         break;
                     case CommandLogged.ListClasses:
                         running = ListClasses(networkDataHelper);
@@ -214,14 +212,12 @@ public class Client
     }
     internal static bool ShowClasesofTheUser(NetworkDataHelper networkDataHelper)
     {
-        //primero paso el nombre del usuario logueado
         byte[] nombreUsuario = Encoding.UTF8.GetBytes(userLogged);
         byte[] nombreUsuarioLength = BitConverter.GetBytes(nombreUsuario.Length);
         try
         {
             networkDataHelper.Send(nombreUsuarioLength);
             networkDataHelper.Send(nombreUsuario);
-            //luego recibo la cantidad de clases
             byte[] classCountBytes = networkDataHelper.Receive(4);
             int classCount = BitConverter.ToInt32(classCountBytes);
             if (classCount == 0)
@@ -267,7 +263,6 @@ public class Client
 
     internal static bool LeaveClass(NetworkDataHelper networkDataHelper)
     {
-        //muestro lista de clases con ListClasses
         ShowClasesofTheUser(networkDataHelper);
         Console.Write("\nType the name of the class you want to leave: ");
         string? className = Console.ReadLine();
@@ -530,13 +525,12 @@ public class Client
                     Directory.CreateDirectory($"Images/{className}");
                     fileStreamHelper.Write($"Images/{className}/" + fileName, buffer);
                     currentPart++;
-                    // No se si el usuario deberia ver el progreso de descarga
                 }
 
                 string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
                 Console.WriteLine($"File {fileName} received successfully at: {imgPath}");
             }
-            catch (FormatException e) // Tuve que especificar para que funcione el socketexception del otro try catch
+            catch (FormatException e)
             {
                 Console.WriteLine($"\nInvalid input, try again. ({e.Message})");
 

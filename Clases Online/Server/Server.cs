@@ -17,11 +17,10 @@ namespace Server
         static readonly object clientThreadsLock = new object();
         static int currentClients = 0;
 
+        // --- configuración y dominio ---
         static readonly SettingManager settingsMgr = new SettingManager();
-
         static readonly List<Usuario> users = new List<Usuario>();
         static readonly object usersLock = new object();
-
         static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
 
@@ -30,8 +29,8 @@ namespace Server
 
         static void Main(string[] args)
         {
-            users.Add(new Usuario("1", "1"));
 
+            // Clases de ejemplo creadas por el usuario base
             var usuarioBase = users.First(u => u.nombre == "1");
             string today = DateTime.Now.ToString("yyyy-MM-dd");
             classes.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
@@ -65,13 +64,13 @@ namespace Server
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
-            var serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
+            // Bind + Listen
             serverSocket.Bind(serverEndPoint);
             serverSocket.Listen();
-            Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
             while (running)
+            while (true)
             {
                 Socket clientSocket = serverSocket.Accept();
 
@@ -94,9 +93,9 @@ namespace Server
 
                 var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
                 clientThread.Start();
-            }
             serverSocket.Shutdown(SocketShutdown.Both);
             serverSocket.Close();
+            // serverSocket.Close();
         }
 
         static void HandleClient(Socket clientSocket, int clientNum)
@@ -109,8 +108,8 @@ namespace Server
             try
             {
                 while (connected && running)
-                {
                     while (!clientLogged && connected && running)
+                    while (!clientLogged && connected)
                     {
                         try
                         {
@@ -147,8 +146,8 @@ namespace Server
                             connected = false;
                         }
                     }
-
                     while (clientLogged && connected && running)
+                    while (clientLogged && connected)
                     {
                         try
                         {
@@ -178,7 +177,6 @@ namespace Server
                                     HandleLeaveClass(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.History:
-                                    // TODO: HandleHistory(networkDataHelper, commandData);
                                     break;
                                 case CommandLogged.Exit:
                                     HandleLogout(networkDataHelper, commandData);
@@ -213,9 +211,7 @@ namespace Server
 
         static bool HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
-            //primero mostramos todas las clases de la misma forma que en ListClasses
             showClasesOfTheClient(networkDataHelper);
-            //luego esperamos a que el cliente nos diga cual quiere dejar
             byte[] classNameLengthBytes = networkDataHelper.Receive(sizeof(int));
             int classNameLength = BitConverter.ToInt32(classNameLengthBytes);
             byte[] classNameBytes = networkDataHelper.Receive(classNameLength);
@@ -251,16 +247,14 @@ namespace Server
 
                 lock (clasesLock)
                 {
-                    if (clase.usuarios.Contains(usuario)) // me fijo si el ususario esta en la clase
+                    if (clase.usuarios.Contains(usuario))
                     {
-                        clase.usuarios.Remove(usuario); // lo saco de la clase
-                        //le aviso al cliente que se fue de la clase
+                        clase.usuarios.Remove(usuario);
                         networkDataHelper.Send(BitConverter.GetBytes(true));
                         return true;
                     }
                     else
                     {
-                        //le aviso al cliente que no estaba en la clase
                         networkDataHelper.Send(BitConverter.GetBytes(false));
                         return false;
                     }
@@ -277,7 +271,6 @@ namespace Server
 
         static void showClasesOfTheClient(NetworkDataHelper networkDataHelper)
         {
-            //primero recivimos que usuario es
             byte[] userNameLengthBytes = networkDataHelper.Receive(sizeof(int));
             int userNameLength = BitConverter.ToInt32(userNameLengthBytes);
             byte[] userNameBytes = networkDataHelper.Receive(userNameLength);
@@ -291,13 +284,11 @@ namespace Server
 
             if (usuarioLogeado == null)
             {
-                // Enviamos 0 clases si el usuario no existe
                 byte[] cero = BitConverter.GetBytes(0);
                 networkDataHelper.Send(cero);
                 return;
             }
 
-            //luego contamos cuantas clases tiene
             int cantClases = 0;
             List<Clase> clasesUsuario = new List<Clase>();
 
@@ -309,15 +300,12 @@ namespace Server
                 }
             }
 
-            //le enviamos la cantidad de clases
             byte[] cantClasesBytes = BitConverter.GetBytes(cantClases);
             networkDataHelper.Send(cantClasesBytes);
-            //luego enviamos cada clase
             try
             {
                 foreach (var clase in clasesUsuario)
                 {
-                    // nombre|descripcion|cuposOcupados/cuposTotales|yyyy-MM-dd|HH:mm|duracion|imgUrl|owner
                     string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
                     byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                     byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
@@ -334,7 +322,6 @@ namespace Server
         static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             Console.WriteLine("Client logged out.");
-            // Confirmamos al cliente que el logout fue exitoso
             networkDataHelper.Send(BitConverter.GetBytes(true));
         }
 
@@ -350,7 +337,6 @@ namespace Server
                     networkDataHelper.Send(cantClasesBytes);
                     foreach (var clase in classes)
                     {
-                        // nombre|descripcion|cuposOcupados/cuposTotales|yyyy-MM-dd|HH:mm|duracion|imgUrl|owner
                         string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
                         byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                         byte[] claseInfoLengthBytes = BitConverter.GetBytes(claseInfoBytes.Length);
@@ -459,7 +445,6 @@ namespace Server
             return validUser;
         }
 
-        // Cliente envia: name|desc|quota|yyyy-MM-dd|HH:mm|dur|hasImg|user
         static bool HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
@@ -480,7 +465,10 @@ namespace Server
             string user = p[7];
             string imgUrl = "";
             string link = $"www.classlink.com/{name.Replace(" ", "_").ToLower()}";
+<<<<<<< HEAD
 
+=======
+>>>>>>> featureComents
             if (!okQuota || !okDur)
             {
                 dataHelper.Send(BitConverter.GetBytes(false));
@@ -570,7 +558,6 @@ namespace Server
                             }
 
                             throw e;
-                            // Lanzo de nuevo la excepcion para que se maneje en HandleClient
                         }
                         catch (Exception e)
                         {
@@ -626,7 +613,7 @@ namespace Server
                     {
                         if (c.CuposDisponibles > 0)
                         {
-                            string classInfo = $"{c.Nombre}|{c.CuposMaximos - c.CuposDisponibles}|{c.CuposMaximos}"; // nombre | cuposOcupados | cuposTotales
+                            string classInfo = $"{c.Nombre}|{c.CuposMaximos - c.CuposDisponibles}|{c.CuposMaximos}";
                             byte[] classInfoBytes = Encoding.UTF8.GetBytes(classInfo);
                             byte[] classInfoLengthBytes = BitConverter.GetBytes(classInfoBytes.Length);
                             networkDataHelper.Send(classInfoLengthBytes);

@@ -6,7 +6,7 @@ public class Protocol
     public static int CommandStringLength = 2;
     public static string request = "REQ";
     public static string Response = "RES";
-    public const int MaxFileChunkSize = 32768; // 32k
+    public const int MaxFileChunkSize = 32768;
     public const int FileNameLenghtSize = 4;
     public const int FileSizeLenghtSize = 8;
 
