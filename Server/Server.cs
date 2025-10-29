@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using Common;
 using Dominio;
+using System.IO;
 
 namespace Server
 {
@@ -23,6 +24,9 @@ namespace Server
 
         static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
+
+        static readonly Dictionary<string, HashSet<string>> cancellations = new Dictionary<string, HashSet<string>>();
+        static readonly object cancelLock = new object();
 
         static volatile bool running = true;
 
@@ -129,7 +133,7 @@ namespace Server
                             switch (command)
                             {
                                 case Command.Register: HandleRegister(networkDataHelper, commandData); break;
-                                case Command.Login:    clientLogged = HandleLogin(networkDataHelper, commandData); break;
+                                case Command.Login: clientLogged = HandleLogin(networkDataHelper, commandData); break;
                                 default: Console.WriteLine($"Unknown pre-login command from client {clientNum}: {command}"); break;
                             }
                         }
@@ -160,12 +164,12 @@ namespace Server
                             switch (commandLogged)
                             {
                                 case CommandLogged.CreateClass: HandleCreateClass(networkDataHelper, commandData); break;
-                                case CommandLogged.JoinClass:   HandleJoinClass(networkDataHelper); break;
+                                case CommandLogged.JoinClass: HandleJoinClass(networkDataHelper); break;
                                 case CommandLogged.ListClasses: HandleListClasses(networkDataHelper, commandData); break;
-                                case CommandLogged.LeaveClass:  HandleLeaveClass(networkDataHelper, commandData); break;
-                                case CommandLogged.EditClass:   HandleEditClass(networkDataHelper, commandData); break;
-                                case CommandLogged.History:     /* TODO */ break;
-                                case CommandLogged.Exit:        HandleLogout(networkDataHelper, commandData); clientLogged = false; break;
+                                case CommandLogged.LeaveClass: HandleLeaveClass(networkDataHelper, commandData); break;
+                                case CommandLogged.EditClass: HandleEditClass(networkDataHelper, commandData); break;
+                                case CommandLogged.History: HandleHistory(networkDataHelper, commandData); break;
+                                case CommandLogged.Exit: HandleLogout(networkDataHelper, commandData); clientLogged = false; break;
                                 default: Console.WriteLine($"Unknown logged-in command from client {clientNum}: {commandLogged}"); break;
                             }
                         }
@@ -194,7 +198,6 @@ namespace Server
         {
             try
             {
-                Console.WriteLine("Client logged out.");
                 networkDataHelper.Send(BitConverter.GetBytes(true));
             }
             catch (SocketException)
@@ -348,14 +351,13 @@ namespace Server
 
                             if (!isLastPart)
                             {
-                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
                                 buffer = fsh.Read(path, offset, Protocol.MaxFileChunkSize);
                                 offset += Protocol.MaxFileChunkSize;
                             }
                             else
                             {
                                 long lastPartSize = fileInfo.Length - offset;
-                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {lastPartSize}.");
+                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
                                 buffer = fsh.Read(path, offset, (int)lastPartSize);
                                 offset += lastPartSize;
                             }
@@ -412,6 +414,18 @@ namespace Server
                     }
                 }
 
+                if (joined)
+                {
+                    lock (cancelLock)
+                    {
+                        if (cancellations.ContainsKey(userName))
+                        {
+                            cancellations[userName].Remove(className);
+                            if (cancellations[userName].Count == 0) cancellations.Remove(userName);
+                        }
+                    }
+                }
+
                 networkDataHelper.Send(BitConverter.GetBytes(joined));
             }
             catch (SocketException se)
@@ -424,42 +438,63 @@ namespace Server
             }
         }
 
-        static bool HandleLeaveClass(NetworkDataHelper networkDataHelper, byte[] commandData)
+        static bool HandleLeaveClass(NetworkDataHelper ndh, byte[] _)
         {
-            showClasesOfTheClient(networkDataHelper);
+            showClasesOfTheClient(ndh);
 
-            int classNameLength = BitConverter.ToInt32(networkDataHelper.Receive(sizeof(int)));
-            string data = Encoding.UTF8.GetString(networkDataHelper.Receive(classNameLength));
-            string usuarioLoggeado = data.Split('|')[0];
-            string className = data.Split('|')[1];
+            int len = BitConverter.ToInt32(ndh.Receive(sizeof(int)));
+            string data = Encoding.UTF8.GetString(ndh.Receive(len));
+            string[] parts = data.Split('|');
+            if (parts.Length != 2) { ndh.Send(BitConverter.GetBytes(false)); return false; }
 
-            Clase? clase = null;
+            string userName = parts[0];
+            string className = parts[1];
+
+            Usuario? user;
+            lock (usersLock) { user = users.FirstOrDefault(u => u.nombre == userName); }
+            if (user == null) { ndh.Send(BitConverter.GetBytes(false)); return false; }
+
+            Clase? clase;
             lock (clasesLock) { clase = classes.FirstOrDefault(c => c.Nombre == className); }
+            if (clase == null) { ndh.Send(BitConverter.GetBytes(false)); return false; }
 
             try
             {
-                if (clase == null) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
-
-                Usuario? usuario = null;
-                lock (usersLock) { usuario = users.FirstOrDefault(u => u.nombre.Equals(usuarioLoggeado)); }
-                if (usuario == null) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
-
+                bool removed = false;
                 lock (clasesLock)
                 {
-                    if (clase.usuarios.Contains(usuario))
+                    var found = clase.usuarios.FirstOrDefault(u => u.nombre == userName);
+                    if (found != null)
                     {
-                        clase.usuarios.Remove(usuario);
-                        networkDataHelper.Send(BitConverter.GetBytes(true));
-                        return true;
+                        clase.usuarios.Remove(found);
+                        removed = true;
                     }
-                    networkDataHelper.Send(BitConverter.GetBytes(false));
+                }
+
+                if (!removed)
+                {
+                    ndh.Send(BitConverter.GetBytes(false));
                     return false;
                 }
+
+                lock (cancelLock)
+                {
+                    if (!cancellations.TryGetValue(userName, out var set))
+                    {
+                        set = new HashSet<string>(StringComparer.Ordinal);
+                        cancellations[userName] = set;
+                    }
+                    set.Add(className);
+                }
+
+                ndh.Send(BitConverter.GetBytes(true));
+                Console.WriteLine($"User {userName} left class '{className}'.");
+                return true;
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error leaving class: {e.Message}");
-                networkDataHelper.Send(BitConverter.GetBytes(false));
+                ndh.Send(BitConverter.GetBytes(false));
                 return false;
             }
         }
@@ -486,7 +521,7 @@ namespace Server
             {
                 foreach (var clase in clasesUsuario)
                 {
-                    string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
+                    string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
                     byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
                     networkDataHelper.Send(BitConverter.GetBytes(claseInfoBytes.Length));
                     networkDataHelper.Send(claseInfoBytes);
@@ -548,32 +583,28 @@ namespace Server
 
                                 if (!isLastPart)
                                 {
-                                    Console.WriteLine($"Receiving part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
                                     buffer = dataHelper.Receive(Protocol.MaxFileChunkSize);
                                     offset += Protocol.MaxFileChunkSize;
                                 }
                                 else
                                 {
                                     long lastPartSize = fileSize - offset;
-                                    Console.WriteLine($"Receiving part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
                                     buffer = dataHelper.Receive((int)lastPartSize);
                                     offset += lastPartSize;
                                 }
-                                System.IO.Directory.CreateDirectory("Images");
+                                Directory.CreateDirectory("Images");
                                 fileStreamHelper.Write("Images/" + fileName, buffer);
                                 currentPart++;
                             }
 
-                            Console.WriteLine($"File {fileName} received successfully.");
-                            imgUrl = System.IO.Directory.GetCurrentDirectory() + "/Images/" + fileName;
+                            imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName;
                         }
-                        catch (Exception e)
+                        catch (Exception)
                         {
-                            Console.WriteLine("Server error (image): " + e.Message);
-                            string imgPath = System.IO.Directory.GetCurrentDirectory() + $"/Images/" + fileName;
-                            if (!string.IsNullOrEmpty(fileName) && System.IO.File.Exists(imgPath))
+                            string imgPath = Directory.GetCurrentDirectory() + $"/Images/" + fileName;
+                            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
                             {
-                                try { System.IO.File.Delete(imgPath); } catch { }
+                                try { File.Delete(imgPath); } catch { }
                             }
                         }
                     }
@@ -615,15 +646,14 @@ namespace Server
 
                 if (parts.Length < 8) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
 
-                string className      = parts[0];
-                string newName        = parts[1];
+                string className = parts[0];
+                string newName = parts[1];
                 string newDescription = parts[2];
-                string newQuotaStr    = parts[3];
-                string newDate        = parts[4];
-                string newTime        = parts[5];
+                string newQuotaStr = parts[3];
+                string newDate = parts[4];
+                string newTime = parts[5];
                 string newDurationStr = parts[6];
-                string userName       = parts[7];
-                string hasNewImage    = parts.Length > 8 ? parts[8] : "n";
+                string userName = parts[7];
 
                 if (!int.TryParse(newQuotaStr, out int newQuota) || !int.TryParse(newDurationStr, out int newDuration))
                 { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
@@ -651,16 +681,15 @@ namespace Server
 
                 lock (clasesLock)
                 {
-                    classToEdit.Nombre       = newName;
-                    classToEdit.Descripcion  = newDescription;
+                    classToEdit.Nombre = newName;
+                    classToEdit.Descripcion = newDescription;
                     classToEdit.CuposMaximos = newQuota;
-                    classToEdit.Fecha        = DateTime.Parse(newDate);
-                    classToEdit.Hora         = newTime;
-                    classToEdit.Duracion     = newDuration;
-                    classToEdit.Link         = $"www.classlink.com/{newName.Replace(" ", "_").ToLower()}";
+                    classToEdit.Fecha = DateTime.Parse(newDate);
+                    classToEdit.Hora = newTime;
+                    classToEdit.Duracion = newDuration;
+                    classToEdit.Link = $"www.classlink.com/{newName.Replace(" ", "_").ToLower()}";
                 }
 
-                Console.WriteLine($"Class '{className}' edited by user '{userName}'.");
                 networkDataHelper.Send(BitConverter.GetBytes(true));
                 return true;
             }
@@ -670,6 +699,69 @@ namespace Server
                 networkDataHelper.Send(BitConverter.GetBytes(false));
                 return false;
             }
+        }
+
+        static void HandleHistory(NetworkDataHelper ndh, byte[] cmdData)
+        {
+            try
+            {
+                string userName = Encoding.UTF8.GetString(cmdData);
+                Usuario? user;
+                lock (usersLock) { user = users.FirstOrDefault(u => u.nombre == userName); }
+                if (user == null)
+                {
+                    ndh.Send(BitConverter.GetBytes(0));
+                    return;
+                }
+
+                var results = new Dictionary<string, string>(StringComparer.Ordinal);
+
+                lock (clasesLock)
+                {
+                    foreach (var c in classes.Where(c => c.usuarios.Any(u => u.nombre == userName)))
+                    {
+                        bool finished = IsFinished(c);
+                        string status = finished ? "Finished" : "Active";
+                        results[c.Nombre] = $"{c.Nombre}|{status}|{c.Fecha:yyyy-MM-dd}|{c.Hora}|{c.Duracion}";
+                    }
+                }
+
+                lock (cancelLock)
+                {
+                    if (cancellations.TryGetValue(userName, out var set))
+                    {
+                        foreach (var className in set)
+                        {
+                            Clase? c;
+                            lock (clasesLock) { c = classes.FirstOrDefault(x => x.Nombre == className); }
+                            string fecha = c != null ? c.Fecha.ToString("yyyy-MM-dd") : "";
+                            string hora = c != null ? c.Hora : "";
+                            int dur = c != null ? c.Duracion : 0;
+                            results[className] = $"{className}|Cancelled|{fecha}|{hora}|{dur}";
+                        }
+                    }
+                }
+
+                ndh.Send(BitConverter.GetBytes(results.Count));
+                foreach (var line in results.Values)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(line);
+                    ndh.Send(BitConverter.GetBytes(bytes.Length));
+                    ndh.Send(bytes);
+                }
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine($"Error sending history: {e.Message}");
+                ndh.Send(BitConverter.GetBytes(0));
+            }
+        }
+
+        static bool IsFinished(Clase c)
+        {
+            TimeSpan.TryParse(c.Hora, out var ts);
+            var end = c.Fecha.Date.Add(ts).AddMinutes(c.Duracion);
+            return DateTime.Now >= end;
         }
     }
 }
