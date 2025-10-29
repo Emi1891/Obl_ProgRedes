@@ -1,12 +1,12 @@
 ﻿using Cliente;
 using Common;
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Collections.Generic;
 
 namespace Client
 {
@@ -44,7 +44,6 @@ namespace Client
         static void Main(string[] args)
         {
             Console.WriteLine("Starting Client Application ... ");
-
             var clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
             clientSocket.ReceiveTimeout = 10000;
             clientSocket.SendTimeout = 10000;
@@ -57,17 +56,8 @@ namespace Client
             bool connected = false;
             while (!connected)
             {
-                try
-                {
-                    clientSocket.Connect(serverEndPoint);
-                    connected = true;
-                    Console.WriteLine("\nConnected to server");
-                }
-                catch
-                {
-                    Console.WriteLine("\nCould not connect to server. Retrying in 3 seconds...");
-                    Thread.Sleep(3000);
-                }
+                try { clientSocket.Connect(serverEndPoint); connected = true; Console.WriteLine("\nConnected to server"); }
+                catch { Console.WriteLine("\nCould not connect to server. Retrying in 3 seconds..."); Thread.Sleep(3000); }
             }
 
             _socket = clientSocket;
@@ -77,7 +67,6 @@ namespace Client
             AppDomain.CurrentDomain.ProcessExit += (_, __) => { GracefulExit(); };
 
             bool running = true;
-
             while (running)
             {
                 while (!loggedIn && running)
@@ -85,22 +74,16 @@ namespace Client
                     StartingMenu();
                     string? option = Console.ReadLine();
                     if (option == "3") return;
+                    if (!int.TryParse(option, out int n) || n < 1 || n > 3) { Console.WriteLine("\nInvalid option."); continue; }
 
-                    if (!int.TryParse(option, out int opt) || opt < 1 || opt > 3)
-                    {
-                        Console.WriteLine("\nInvalid option. Try again.");
-                        continue;
-                    }
-
-                    Command command = (Command)(opt - 1);
-
+                    Command command = (Command)(n - 1);
                     _ndh!.Send(Encoding.UTF8.GetBytes(Protocol.request));
                     _ndh.Send(Encoding.UTF8.GetBytes(((int)command).ToString("D2")));
 
                     switch (command)
                     {
-                        case Command.Register: running = Register(_ndh); break;
-                        case Command.Login: running = LogIn(_ndh); break;
+                        case Command.Register: Register(_ndh); break;
+                        case Command.Login: LogIn(_ndh); break;
                     }
                 }
 
@@ -108,61 +91,23 @@ namespace Client
                 {
                     PrintMenu();
                     string? option = Console.ReadLine();
-                    if (!int.TryParse(option, out int opt) || opt < 1 || opt > 7)
-                    {
-                        Console.WriteLine("\nInvalid option. Try again.");
-                        continue;
-                    }
-
-                    CommandLogged command = (CommandLogged)(opt - 1);
+                    if (!int.TryParse(option, out int n) || n < 1 || n > 7) { Console.WriteLine("\nInvalid option."); continue; }
+                    CommandLogged command = (CommandLogged)(n - 1);
 
                     _ndh!.Send(Encoding.UTF8.GetBytes(Protocol.request));
                     _ndh.Send(Encoding.UTF8.GetBytes(((int)command).ToString("D2")));
 
                     switch (command)
                     {
-                        case CommandLogged.CreateClass: running = CreateClass(_ndh); break;
-                        case CommandLogged.JoinClass:   running = JoinClass(_ndh); break;
-                        case CommandLogged.ListClasses: running = ListClasses(_ndh); break;
-                        case CommandLogged.LeaveClass:  running = LeaveClass(_ndh); break;
-                        case CommandLogged.EditClass:   running = EditClass(_ndh); break;
-                        case CommandLogged.History:     Console.WriteLine("Not implemented yet."); break;
-                        case CommandLogged.Exit:        Logout(_ndh); break;
+                        case CommandLogged.CreateClass: CreateClass(_ndh); break;
+                        case CommandLogged.JoinClass: JoinClass(_ndh); break;
+                        case CommandLogged.ListClasses: ListClasses(_ndh); break;
+                        case CommandLogged.LeaveClass: LeaveClass(_ndh); break;
+                        case CommandLogged.EditClass: EditClass(_ndh); break;
+                        case CommandLogged.History: ShowHistory(_ndh); break;
+                        case CommandLogged.Exit: DoLogout(_ndh); break;
                     }
                 }
-            }
-
-            Console.WriteLine("\nConnection interrupted...");
-            try { clientSocket.Shutdown(SocketShutdown.Both); } catch { }
-            try { clientSocket.Close(); } catch { }
-        }
-
-        internal static void Logout(NetworkDataHelper ndh)
-        {
-            try
-            {
-                ndh.Send(BitConverter.GetBytes(0));
-
-                byte[] result = ndh.Receive(1);
-                bool ok = BitConverter.ToBoolean(result);
-
-                if (ok)
-                {
-                    Console.WriteLine("Logged out successfully.");
-                    loggedIn = false;
-                    userLogged = null;
-                }
-                else
-                {
-                    Console.WriteLine("Logout failed.");
-                }
-            }
-            catch
-            {
-                Console.WriteLine("Logged out (connection lost).");
-                loggedIn = false;
-                userLogged = null;
-                try { _socket?.Close(); } catch { }
             }
         }
 
@@ -172,14 +117,9 @@ namespace Client
             {
                 if (loggedIn && _ndh != null && _socket != null && _socket.Connected)
                 {
-                    byte[] mt   = Encoding.UTF8.GetBytes(Protocol.request);
-                    byte[] cmd  = Encoding.UTF8.GetBytes(((int)CommandLogged.Exit).ToString("D2"));
-                    byte[] len0 = BitConverter.GetBytes(0);
-
-                    _ndh.Send(mt);
-                    _ndh.Send(cmd);
-                    _ndh.Send(len0);
-
+                    _ndh.Send(Encoding.UTF8.GetBytes(Protocol.request));
+                    _ndh.Send(Encoding.UTF8.GetBytes(((int)CommandLogged.Exit).ToString("D2")));
+                    _ndh.Send(BitConverter.GetBytes(0));
                     try { _ndh.Receive(1); } catch { }
                 }
             }
@@ -188,436 +128,112 @@ namespace Client
             try { _socket?.Close(); } catch { }
         }
 
-        internal static bool Register(NetworkDataHelper networkDataHelpe)
+        static void DoLogout(NetworkDataHelper ndh)
         {
-            Console.Write("\nEnter username: ");
-            string? userName = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(userName)) { Console.WriteLine("\nUsername can't be null."); return true; }
-
-            Console.Write("Enter password: ");
-            string? password = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("\nPassword can't be null."); return true; }
-
-            string userAndPass = userName + "|" + password;
-            byte[] commandData = Encoding.UTF8.GetBytes(userAndPass);
-            byte[] commandDataLenght = BitConverter.GetBytes(commandData.Length);
-
             try
             {
-                networkDataHelpe.Send(commandDataLenght);
-                networkDataHelpe.Send(commandData);
-
-                bool ok = BitConverter.ToBoolean(networkDataHelpe.Receive(1));
-                Console.WriteLine(ok ? "\nRegistered successfully." : "\nRegister failed, that username already exists.");
-                return true;
+                ndh.Send(BitConverter.GetBytes(0));
+                bool ok = BitConverter.ToBoolean(ndh.Receive(1));
+                if (ok) { Console.WriteLine("Logged out successfully."); loggedIn = false; userLogged = null; }
+                else Console.WriteLine("Logout failed.");
             }
-            catch
-            {
-                Console.WriteLine("\nConnection lost to server.");
-                return false;
-            }
+            catch { Console.WriteLine("Logged out (connection lost)."); loggedIn = false; userLogged = null; }
         }
 
-        internal static bool LogIn(NetworkDataHelper networkDataHelper)
-        {
-            Console.Write("\nEnter username: ");
-            string? userName = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(userName)) { Console.WriteLine("\nUsername can't be null."); return true; }
-
-            Console.Write("Enter password: ");
-            string? password = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("\nPassword can't be null."); return true; }
-
-            string userAndPass = userName + "|" + password;
-            byte[] commandData = Encoding.UTF8.GetBytes(userAndPass);
-            byte[] commandDataLenght = BitConverter.GetBytes(commandData.Length);
-
-            try
-            {
-                networkDataHelper.Send(commandDataLenght);
-                networkDataHelper.Send(commandData);
-
-                bool ok = BitConverter.ToBoolean(networkDataHelper.Receive(1));
-                if (ok)
-                {
-                    Console.WriteLine("\nLogged in successfully.");
-                    loggedIn = true;
-                    userLogged = userName;
-                }
-                else
-                {
-                    Console.WriteLine("\nLogin failed, incorrect username or password.");
-                }
-                return true;
-            }
-            catch
-            {
-                Console.WriteLine("\nConnection lost to server.");
-                return false;
-            }
-        }
-
-        internal static bool ListClasses(NetworkDataHelper networkDataHelper)
-        {
-            string fileName = "";
-            string className = "";
-
-            try
-            {
-                networkDataHelper.Send(BitConverter.GetBytes(0));
-
-                int classCount = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                if (classCount == 0) { Console.WriteLine("\nNo classes available."); return true; }
-
-                Console.WriteLine($"\nThere are {classCount} classes available:");
-                var imgUrls = new List<string[]>();
-
-                for (int i = 0; i < classCount; i++)
-                {
-                    int classDataLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                    string[] classDataSplit = Encoding.UTF8.GetString(networkDataHelper.Receive(classDataLength)).Split('|');
-
-                    Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
-                    Console.WriteLine($"Description: {classDataSplit[1]}");
-                    Console.WriteLine($"Date: {classDataSplit[3]}");
-                    Console.WriteLine($"Time: {classDataSplit[4]}");
-                    Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
-                    Console.WriteLine($"Taken places: {classDataSplit[2]}");
-                    Console.WriteLine($"Creator: {classDataSplit[7]}");
-                    Console.WriteLine($"Link: {classDataSplit[8]}");
-                    Console.WriteLine($"Has cover image: {(classDataSplit[6] == "No image uploaded" ? "No" : "Yes")}");
-
-                    imgUrls.Add(new string[] { (i + 1).ToString(), classDataSplit[6], classDataSplit[0] });
-                }
-
-                bool wantImg = false;
-                Console.Write("\nTo download any cover image, choose the desired class. Otherwise, type 'q': ");
-                string? option = Console.ReadLine();
-                if (string.IsNullOrWhiteSpace(option) || option == "q")
-                {
-                    networkDataHelper.Send(BitConverter.GetBytes(wantImg));
-                    return true;
-                }
-
-                int chosenClass = int.Parse(option);
-                if (chosenClass > classCount || chosenClass < 1)
-                {
-                    Console.WriteLine("\nInvalid input. Number out of range.");
-                    networkDataHelper.Send(BitConverter.GetBytes(wantImg));
-                    return true;
-                }
-
-                string classPath = imgUrls.Find(c => int.Parse(c[0]) == chosenClass)![1];
-                className = imgUrls.Find(c => int.Parse(c[0]) == chosenClass)![2];
-                if (classPath == "No image uploaded")
-                {
-                    Console.WriteLine("\nThe selected class has no cover image.");
-                    networkDataHelper.Send(BitConverter.GetBytes(wantImg));
-                    return true;
-                }
-
-                wantImg = true;
-                networkDataHelper.Send(BitConverter.GetBytes(wantImg));
-
-                byte[] pathBytes = Encoding.UTF8.GetBytes(classPath);
-                networkDataHelper.Send(BitConverter.GetBytes(pathBytes.Length));
-                networkDataHelper.Send(pathBytes);
-
-                int fileNameLength = BitConverter.ToInt32(networkDataHelper.Receive(Protocol.FileNameLenghtSize));
-                string fileNameStr = Encoding.UTF8.GetString(networkDataHelper.Receive(fileNameLength));
-                fileName = fileNameStr;
-
-                long fileSize = BitConverter.ToInt64(networkDataHelper.Receive(Protocol.FileSizeLenghtSize));
-
-                long offset = 0;
-                long partCount = Protocol.CalculateFileParts(fileSize);
-                long currentPart = 1;
-
-                FileStreamHelper fsh = new FileStreamHelper();
-
-                while (offset < fileSize)
-                {
-                    byte[] buffer;
-                    bool isLastPart = currentPart == partCount;
-
-                    if (!isLastPart)
-                    {
-                        buffer = networkDataHelper.Receive(Protocol.MaxFileChunkSize);
-                        offset += Protocol.MaxFileChunkSize;
-                    }
-                    else
-                    {
-                        long lastPartSize = fileSize - offset;
-                        buffer = networkDataHelper.Receive((int)lastPartSize);
-                        offset += lastPartSize;
-                    }
-                    Directory.CreateDirectory($"Images/{className}");
-                    fsh.Write($"Images/{className}/" + fileName, buffer);
-                    currentPart++;
-                }
-
-                string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
-                Console.WriteLine($"File {fileName} received successfully at: {imgPath}");
-                return true;
-            }
-            catch
-            {
-                Console.WriteLine("\nConnection lost to server.");
-
-                string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
-                if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
-                {
-                    try { File.Delete(imgPath); Console.WriteLine($"Incomplete file {fileName} deleted from: {imgPath}"); }
-                    catch { }
-                }
-                return false;
-            }
-        }
-
-        public static bool JoinClass(NetworkDataHelper networkDataHelper)
-        {
-            networkDataHelper.Send(BitConverter.GetBytes(0));
-
-            int classCounter = BitConverter.ToInt32(networkDataHelper.Receive(4));
-            int classNumber = 0;
-            List<string[]> listedClasses = new List<string[]>();
-
-            Console.WriteLine("\nAvailable classes to enroll:\n");
-            for (int i = 0; i < classCounter; i++)
-            {
-                classNumber++;
-
-                int classInfoLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                string[] classInfoSplit = Encoding.UTF8.GetString(networkDataHelper.Receive(classInfoLength)).Split('|');
-
-                string className = classInfoSplit[0];
-                string quotaOccupied = classInfoSplit[1];
-                string totalQuota = classInfoSplit[2];
-                listedClasses.Add(new[] { classNumber.ToString(), className });
-
-                Console.WriteLine($"{classNumber}. {className} ({quotaOccupied}/{totalQuota})");
-            }
-
-            Console.WriteLine($"\n{classNumber + 1}. Go back");
-
-            if (classCounter == 0)
-            {
-                Console.WriteLine("\nNo classes available.");
-                return false;
-            }
-
-            Console.Write("\nChoose an option: ");
-            try
-            {
-                int chosenClass = int.Parse(Console.ReadLine()!);
-                if (chosenClass == classCounter + 1) return true;
-                if (chosenClass > classCounter || chosenClass < 1)
-                {
-                    Console.WriteLine("\nInvalid input. Number out of range.");
-                    return true;
-                }
-
-                string selectedClassName = listedClasses.Find(c => int.Parse(c[0]) == chosenClass)![1];
-                string classAndUserName = selectedClassName + $"|{userLogged}";
-
-                byte[] classAndUserNameBytes = Encoding.UTF8.GetBytes(classAndUserName);
-                networkDataHelper.Send(BitConverter.GetBytes(classAndUserNameBytes.Length));
-                networkDataHelper.Send(classAndUserNameBytes);
-
-                bool joined = BitConverter.ToBoolean(networkDataHelper.Receive(1));
-                Console.WriteLine(joined
-                    ? $"\nYou have successfully joined the class: {selectedClassName}"
-                    : $"\nCould not join the class: {selectedClassName}. It may be full or you are already enrolled.");
-                return true;
-            }
-            catch (SocketException)
-            {
-                Console.WriteLine($"\nConnection lost to server.");
-                return false;
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"\nInvalid input, try again. ({e.Message})");
-                return true;
-            }
-        }
-
-        public static bool CreateClass(NetworkDataHelper networkDataHelper)
-        {
-            Console.Write("\nEnter class name: ");
-            string? className = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(className)) { Console.WriteLine("\nClass name can't be null."); return true; }
-
-            Console.Write("Enter class description: ");
-            string? classDescription = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(classDescription)) { Console.WriteLine("\nClass description can't be null."); return true; }
-
-            Console.Write("Enter class maximum quotas: ");
-            string? classuQotas = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(classuQotas)) { Console.WriteLine("\nClass quotas cannot be null"); return true; }
-
-            Console.Write("Enter class start date (DD/MM/YYYY) \nIf left blank, default date (today) will be applied: ");
-            string? classStartDate = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(classStartDate))
-            {
-                classStartDate = DateTime.Now.ToString("dd/MM/yyyy");
-                Console.WriteLine("Default date applied: " + classStartDate);
-            }
-
-            Console.Write("Enter class start time (HH:MM): ");
-            string? classStartTime = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(classStartTime)) { Console.WriteLine("\nClass start time cannot be null"); return true; }
-
-            Console.Write("Enter class duration (in minutes): ");
-            string? classDuration = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(classDuration)) { Console.WriteLine("\nClass duration cannot be null"); return true; }
-
-            Console.Write("Would you like to upload a cover image? (y/n): ");
-            string? hasCoverImage = Console.ReadLine();
-            if (hasCoverImage != "y" && hasCoverImage != "n") { Console.WriteLine("\nInvalid input. Enter 'y' or 'n'."); return true; }
-
-            string ClassData = className + "|" + classDescription + "|" + classuQotas + "|" + classStartDate + "|" + classStartTime + "|" + classDuration + "|" + hasCoverImage + "|" + userLogged;
-            byte[] commandData = Encoding.UTF8.GetBytes(ClassData);
-            networkDataHelper.Send(BitConverter.GetBytes(commandData.Length));
-            networkDataHelper.Send(commandData);
-
-            try
-            {
-                if (hasCoverImage == "y")
-                {
-                    Console.Write("Type the image path: ");
-                    string? filePath = Console.ReadLine();
-
-                    FileInfo fileInfo = new FileInfo(filePath);
-                    string fileName = fileInfo.Name;
-
-                    byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
-                    networkDataHelper.Send(BitConverter.GetBytes(fileNameBytes.Length));
-                    networkDataHelper.Send(fileNameBytes);
-
-                    long fileSize = fileInfo.Length;
-                    networkDataHelper.Send(BitConverter.GetBytes(fileSize));
-
-                    long offset = 0;
-                    long partCount = Protocol.CalculateFileParts(fileSize);
-                    long currentPart = 1;
-
-                    FileStreamHelper fileStreamHelper = new FileStreamHelper();
-
-                    while (offset < fileSize)
-                    {
-                        byte[] buffer;
-                        bool isLastPart = currentPart == partCount;
-
-                        if (!isLastPart)
-                        {
-                            Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
-                            buffer = fileStreamHelper.Read(filePath, offset, Protocol.MaxFileChunkSize);
-                            offset += Protocol.MaxFileChunkSize;
-                        }
-                        else
-                        {
-                            long lastPartSize = fileSize - offset;
-                            Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
-                            buffer = fileStreamHelper.Read(filePath, offset, (int)lastPartSize);
-                            offset += lastPartSize;
-                        }
-                        networkDataHelper.Send(buffer);
-                        currentPart++;
-                    }
-                }
-
-                bool classCreated = BitConverter.ToBoolean(networkDataHelper.Receive(1));
-                Console.WriteLine(classCreated ? "\nClass created successfully." : "\nClass creation failed, try again.");
-                return true;
-            }
-            catch
-            {
-                Console.WriteLine("\nConnection lost to server.");
-                return false;
-            }
-        }
-
-        internal static bool ShowClasesofTheUser(NetworkDataHelper networkDataHelper)
+        internal static bool ShowClasesofTheUser(NetworkDataHelper ndh)
         {
             byte[] nombreUsuario = Encoding.UTF8.GetBytes(userLogged ?? "");
-            networkDataHelper.Send(BitConverter.GetBytes(nombreUsuario.Length));
-            networkDataHelper.Send(nombreUsuario);
+            ndh.Send(BitConverter.GetBytes(nombreUsuario.Length));
+            ndh.Send(nombreUsuario);
 
-            try
+            int classCount = BitConverter.ToInt32(ndh.Receive(4));
+            if (classCount == 0) { Console.WriteLine("\nYou are not enrolled in any classes."); return true; }
+
+            Console.WriteLine($"\nYou are enrolled in {classCount} classes:");
+            for (int i = 0; i < classCount; i++)
             {
-                int classCount = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                if (classCount == 0)
-                {
-                    Console.WriteLine("\nYou are not enrolled in any classes.");
-                    return true;
-                }
-                Console.WriteLine($"\nYou are enrolled in {classCount} classes:");
-
-                for (int i = 0; i < classCount; i++)
-                {
-                    int classDataLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                    string[] classDataSplit = Encoding.UTF8.GetString(networkDataHelper.Receive(classDataLength)).Split('|');
-
-                    Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
-                    Console.WriteLine($"Description: {classDataSplit[1]}");
-                    Console.WriteLine($"Date: {classDataSplit[3]}");
-                    Console.WriteLine($"Time: {classDataSplit[4]}");
-                    Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
-                    Console.WriteLine($"Taken places: {classDataSplit[2]}");
-                    Console.WriteLine($"Creator: {classDataSplit[7]}");
-                    Console.WriteLine($"Has cover image: {(classDataSplit[6] == "No image uploaded" ? "No" : "Yes")}");
-                }
-            }
-            catch
-            {
-                Console.WriteLine("\nConnection lost to server.");
-                return false;
+                int len = BitConverter.ToInt32(ndh.Receive(4));
+                string classData = Encoding.UTF8.GetString(ndh.Receive(len));
+                string[] s = classData.Split('|');
+                Console.WriteLine($"\nClass {i + 1}: {s[0]}");
+                Console.WriteLine($"Description: {s[1]}");
+                Console.WriteLine($"Date: {s[3]}");
+                Console.WriteLine($"Time: {s[4]}");
+                Console.WriteLine($"Duration: {s[5]} minutes");
+                Console.WriteLine($"Taken places: {s[2]}");
+                Console.WriteLine($"Creator: {s[7]}");
+                Console.WriteLine($"Has cover image: {(s[6] == "No image uploaded" ? "No" : "Yes")}");
             }
             return true;
         }
 
-        internal static bool LeaveClass(NetworkDataHelper networkDataHelper)
+        internal static bool LeaveClass(NetworkDataHelper ndh)
         {
-            if (!ShowClasesofTheUser(networkDataHelper)) return false;
-
-            Console.Write("\nType the name of the class you want to leave: ");
-            string? className = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(className))
+            if (string.IsNullOrWhiteSpace(userLogged))
             {
-                Console.WriteLine("\nClass name can't be null.");
+                Console.WriteLine("\nYou must be logged in.");
                 return true;
             }
 
-            string data = $"{userLogged}|{className}";
-            byte[] dataBytes = Encoding.UTF8.GetBytes(data);
+            ndh.Send(BitConverter.GetBytes(0));
 
-            try
-            {
-                networkDataHelper.Send(BitConverter.GetBytes(dataBytes.Length));
-                networkDataHelper.Send(dataBytes);
+            byte[] userBytes = Encoding.UTF8.GetBytes(userLogged);
+            ndh.Send(BitConverter.GetBytes(userBytes.Length));
+            ndh.Send(userBytes);
 
-                bool ok = BitConverter.ToBoolean(networkDataHelper.Receive(1));
-                Console.WriteLine(ok ? "\nLeft class successfully."
-                                     : "\nCould not leave class, you might not be enrolled in it.");
-            }
-            catch
+            int count = BitConverter.ToInt32(ndh.Receive(4));
+            if (count == 0)
             {
-                Console.WriteLine("\nConnection lost to server.");
-                return false;
+                Console.WriteLine("\nYou are not enrolled in any class.");
+                return true;
             }
+
+            var myClasses = new List<string>();
+            Console.WriteLine("\nYour enrolled classes:\n");
+            for (int i = 0; i < count; i++)
+            {
+                int len = BitConverter.ToInt32(ndh.Receive(4));
+                string info = Encoding.UTF8.GetString(ndh.Receive(len));
+                string name = info.Split('|')[0];
+                myClasses.Add(name);
+                Console.WriteLine($"{i + 1}. {name}");
+            }
+            Console.WriteLine($"\n{count + 1}. Go back");
+
+            Console.Write("\nChoose a class to leave: ");
+            string? optStr = Console.ReadLine();
+            if (!int.TryParse(optStr, out int opt) || opt < 1 || opt > count + 1)
+            {
+                Console.WriteLine("\nInvalid input.");
+                return true;
+            }
+            if (opt == count + 1) return true;
+
+            string className = myClasses[opt - 1];
+
+            string payload = $"{userLogged}|{className}";
+            byte[] payloadBytes = Encoding.UTF8.GetBytes(payload);
+            ndh.Send(BitConverter.GetBytes(payloadBytes.Length));
+            ndh.Send(payloadBytes);
+
+            bool ok = BitConverter.ToBoolean(ndh.Receive(1));
+            Console.WriteLine(ok
+                ? $"\nYou left '{className}' successfully."
+                : "\nCould not leave the class.");
+
             return true;
         }
 
-        internal static bool EditClass(NetworkDataHelper networkDataHelper)
-        {
-            Console.WriteLine("\nEdit Class:");
 
-            Console.Write("\nType the current class name: ");
+
+        internal static bool EditClass(NetworkDataHelper ndh)
+        {
+            Console.WriteLine("\nEdit Class functionality:");
+            Console.Write("\nType the name of the class you want to edit: ");
             string? className = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(className)) { Console.WriteLine("\nClass name can't be null."); return true; }
 
-            Console.Write("Enter new class name: ");
+            Console.Write("\nEnter new class name: ");
             string? newName = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(newName)) { Console.WriteLine("\nNew class name can't be null."); return true; }
 
@@ -640,55 +256,278 @@ namespace Client
             if (!int.TryParse(Console.ReadLine(), out int newDuration) || newDuration <= 0) { Console.WriteLine("\nInvalid duration."); return true; }
 
             string hasNewImage = "n";
+            string cmdData = $"{className}|{newName}|{newDescription}|{newQuota}|{newDate}|{newTime}|{newDuration}|{userLogged}|{hasNewImage}";
+            byte[] bytes = Encoding.UTF8.GetBytes(cmdData);
+            ndh.Send(BitConverter.GetBytes(bytes.Length));
+            ndh.Send(bytes);
 
-            string commandData = $"{className}|{newName}|{newDescription}|{newQuota}|{newDate}|{newTime}|{newDuration}|{userLogged}|{hasNewImage}";
-            byte[] commandDataBytes = Encoding.UTF8.GetBytes(commandData);
-
-            try
-            {
-                networkDataHelper.Send(BitConverter.GetBytes(commandDataBytes.Length));
-                networkDataHelper.Send(commandDataBytes);
-
-                bool ok = BitConverter.ToBoolean(networkDataHelper.Receive(1));
-                Console.WriteLine(ok ? "\nClass edited successfully."
-                                     : "\nCould not edit class. You might not be the owner, the class doesn't exist, or data is invalid.");
-            }
-            catch
-            {
-                Console.WriteLine("\nConnection lost to server.");
-                return false;
-            }
+            bool ok = BitConverter.ToBoolean(ndh.Receive(1));
+            Console.WriteLine(ok ? "\nClass edited successfully." : "\nCould not edit class. You might not be the owner or the class doesn't exist.");
             return true;
         }
 
-        static bool ReconnectToServer()
+        internal static void ShowHistory(NetworkDataHelper ndh)
         {
+            string user = userLogged ?? "";
+            byte[] u = Encoding.UTF8.GetBytes(user);
+            ndh.Send(BitConverter.GetBytes(u.Length));
+            ndh.Send(u);
+
+            int n = BitConverter.ToInt32(ndh.Receive(4));
+            if (n == 0) { Console.WriteLine("\nNo history yet."); return; }
+
+            Console.WriteLine($"\nHistory ({n}):");
+            for (int i = 0; i < n; i++)
+            {
+                int len = BitConverter.ToInt32(ndh.Receive(4));
+                string row = Encoding.UTF8.GetString(ndh.Receive(len));
+                Console.WriteLine(row);
+            }
+        }
+
+        internal static bool ListClasses(NetworkDataHelper ndh)
+        {
+            string fileName = "";
+            string className = "";
             try
             {
-                try { _socket?.Close(); } catch { }
+                ndh.Send(BitConverter.GetBytes(0));
+                int classCount = BitConverter.ToInt32(ndh.Receive(4));
+                if (classCount == 0) { Console.WriteLine("\nNo classes available."); return true; }
+                Console.WriteLine($"\nThere are {classCount} classes available:");
 
-                var newSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                newSocket.ReceiveTimeout = 10000;
-                newSocket.SendTimeout = 10000;
-                newSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                List<string[]> imgUrls = new List<string[]>();
+                for (int i = 0; i < classCount; i++)
+                {
+                    int len = BitConverter.ToInt32(ndh.Receive(4));
+                    string classData = Encoding.UTF8.GetString(ndh.Receive(len));
+                    string[] s = classData.Split('|');
 
-                IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-                int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
-                IPEndPoint serverEndPoint = new IPEndPoint(serverIp, serverPort);
+                    Console.WriteLine($"\nClass {i + 1}: {s[0]}");
+                    Console.WriteLine($"Description: {s[1]}");
+                    Console.WriteLine($"Date: {s[3]}");
+                    Console.WriteLine($"Time: {s[4]}");
+                    Console.WriteLine($"Duration: {s[5]} minutes");
+                    Console.WriteLine($"Taken places: {s[2]}");
+                    Console.WriteLine($"Creator: {s[7]}");
+                    Console.WriteLine($"Link: {s[8]}");
+                    Console.WriteLine($"Has cover image: {(s[6] == "No image uploaded" ? "No" : "Yes")}");
+                    imgUrls.Add(new string[] { (i + 1).ToString(), s[6], s[0] });
+                }
 
-                newSocket.Connect(serverEndPoint);
+                bool wantImg = false;
+                Console.Write("\nTo download any cover image, choose the desired class. Otherwise, type 'q': ");
+                string? opt = Console.ReadLine();
+                if (string.IsNullOrWhiteSpace(opt) || opt == "q") { ndh.Send(BitConverter.GetBytes(wantImg)); return true; }
 
-                _socket = newSocket;
-                _ndh = new NetworkDataHelper(newSocket);
+                int chosen = int.Parse(opt);
+                if (chosen > classCount || chosen < 1) { Console.WriteLine("\nInvalid input."); ndh.Send(BitConverter.GetBytes(wantImg)); return true; }
 
-                Console.WriteLine("Reconnected to server successfully.");
+                string path = imgUrls.Find(c => int.Parse(c[0]) == chosen)![1];
+                className = imgUrls.Find(c => int.Parse(c[0]) == chosen)![2];
+                if (path == "No image uploaded") { Console.WriteLine("\nThe selected class has no cover image."); ndh.Send(BitConverter.GetBytes(wantImg)); return true; }
+
+                wantImg = true;
+                ndh.Send(BitConverter.GetBytes(wantImg));
+
+                byte[] pb = Encoding.UTF8.GetBytes(path);
+                ndh.Send(BitConverter.GetBytes(pb.Length));
+                ndh.Send(pb);
+
+                int fileNameLength = BitConverter.ToInt32(ndh.Receive(Protocol.FileNameLenghtSize));
+                fileName = Encoding.UTF8.GetString(ndh.Receive(fileNameLength));
+                long fileSize = BitConverter.ToInt64(ndh.Receive(Protocol.FileSizeLenghtSize));
+
+                long offset = 0;
+                long partCount = Protocol.CalculateFileParts(fileSize);
+                long currentPart = 1;
+                FileStreamHelper fs = new FileStreamHelper();
+
+                while (offset < fileSize)
+                {
+                    byte[] buffer;
+                    bool last = currentPart == partCount;
+                    if (!last)
+                    {
+                        buffer = ndh.Receive(Protocol.MaxFileChunkSize);
+                        offset += Protocol.MaxFileChunkSize;
+                    }
+                    else
+                    {
+                        long lastSize = fileSize - offset;
+                        buffer = ndh.Receive((int)lastSize);
+                        offset += lastSize;
+                    }
+                    Directory.CreateDirectory($"Images/{className}");
+                    fs.Write($"Images/{className}/" + fileName, buffer);
+                    currentPart++;
+                }
+
+                string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+                Console.WriteLine($"File {fileName} received successfully at: {imgPath}");
                 return true;
             }
             catch
             {
-                Console.WriteLine("Failed to reconnect to server.");
+                string imgPath = Directory.GetCurrentDirectory() + $"/Images/{className}/" + fileName;
+                if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath)) { try { File.Delete(imgPath); } catch { } }
+                Console.WriteLine("\nConnection lost to server.");
                 return false;
             }
+        }
+
+        internal static bool Register(NetworkDataHelper ndh)
+        {
+            Console.Write("\nEnter username: ");
+            string? userName = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(userName)) { Console.WriteLine("\nUsername can't be null."); return true; }
+
+            Console.Write("Enter password: ");
+            string? password = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("\nPassword can't be null."); return true; }
+
+            string userAndPass = userName + "|" + password;
+            byte[] data = Encoding.UTF8.GetBytes(userAndPass);
+            ndh.Send(BitConverter.GetBytes(data.Length));
+            ndh.Send(data);
+
+            bool ok = BitConverter.ToBoolean(ndh.Receive(1));
+            Console.WriteLine(ok ? "\nRegistered successfully." : "\nRegister failed, that username already exists.");
+            return true;
+        }
+
+        internal static bool LogIn(NetworkDataHelper ndh)
+        {
+            Console.Write("\nEnter username: ");
+            string? userName = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(userName)) { Console.WriteLine("\nUsername can't be null."); return true; }
+
+            Console.Write("Enter password: ");
+            string? password = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(password)) { Console.WriteLine("\nPassword can't be null."); return true; }
+
+            string userAndPass = userName + "|" + password;
+            byte[] data = Encoding.UTF8.GetBytes(userAndPass);
+            ndh.Send(BitConverter.GetBytes(data.Length));
+            ndh.Send(data);
+
+            bool ok = BitConverter.ToBoolean(ndh.Receive(1));
+            if (ok) { Console.WriteLine("\nLogged in successfully."); loggedIn = true; userLogged = userName; }
+            else { Console.WriteLine("\nLogin failed, incorrect username or password."); }
+            return true;
+        }
+
+        public static bool JoinClass(NetworkDataHelper ndh)
+        {
+            ndh.Send(BitConverter.GetBytes(0));
+            int classCounter = BitConverter.ToInt32(ndh.Receive(4));
+            int classNumber = 0;
+            List<string[]> listed = new List<string[]>();
+
+            Console.WriteLine("\nAviable classes to enroll:\n");
+            for (int i = 0; i < classCounter; i++)
+            {
+                classNumber++;
+                int len = BitConverter.ToInt32(ndh.Receive(4));
+                string info = Encoding.UTF8.GetString(ndh.Receive(len));
+                string[] s = info.Split('|');
+                string className = s[0];
+                string quotaOccupied = s[1];
+                string totalQuota = s[2];
+                listed.Add(new[] { classNumber.ToString(), className });
+                Console.WriteLine($"{classNumber}. {className} ({quotaOccupied}/{totalQuota})");
+            }
+
+            Console.WriteLine($"\n{classNumber + 1}. Go back");
+            if (classCounter == 0) { Console.WriteLine("\nNo classes aviable."); return false; }
+
+            Console.Write("\nChoose an option: ");
+            try
+            {
+                int chosen = int.Parse(Console.ReadLine()!);
+                if (chosen == classCounter + 1) return true;
+                if (chosen > classCounter || chosen < 1) { Console.WriteLine("\nInvalid input."); return true; }
+
+                string selected = listed.Find(c => int.Parse(c[0]) == chosen)![1];
+                string classAndUser = selected + $"|{userLogged}";
+                byte[] b = Encoding.UTF8.GetBytes(classAndUser);
+                ndh.Send(BitConverter.GetBytes(b.Length));
+                ndh.Send(b);
+
+                bool joined = BitConverter.ToBoolean(ndh.Receive(1));
+                Console.WriteLine(joined ? $"\nYou have successfully joined the class: {selected}"
+                                         : $"\nCould not join the class: {selected}. It may be full or you are already enrolled.");
+                return true;
+            }
+            catch (SocketException) { Console.WriteLine($"\nConnection lost to server."); return false; }
+            catch (Exception e) { Console.WriteLine($"\nInvalid input, try again. ({e.Message})"); return true; }
+        }
+
+        public static bool CreateClass(NetworkDataHelper ndh)
+        {
+            Console.Write("\nEnter class name: ");
+            string? className = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(className)) { Console.WriteLine("\nClass name can't be null."); return true; }
+
+            Console.Write("Enter class description: ");
+            string? desc = Console.ReadLine();
+            if (string.IsNullOrWhiteSpace(desc)) { Console.WriteLine("\nClass description can't be null."); return true; }
+
+            Console.Write("Enter class maximum quotas: ");
+            string? quotas = Console.ReadLine();
+            if (quotas == "") { Console.WriteLine("\nClass quotas cannot be null"); return true; }
+
+            Console.Write("Enter class start date (DD/MM/YYYY) \nIf left blank, default date (today) will be applied: ");
+            string? date = Console.ReadLine();
+            if (date == "") { date = DateTime.Now.ToString("dd/MM/yyyy"); Console.WriteLine("Default date applied: " + date); }
+
+            Console.Write("Enter class start time (HH:MM): ");
+            string? time = Console.ReadLine();
+            if (time == "") { Console.WriteLine("\nClass start time cannot be null"); return true; }
+
+            Console.Write("Enter class duration (in minutes): ");
+            string? duration = Console.ReadLine();
+            if (duration == "") { Console.WriteLine("\nClass duration cannot be null"); return true; }
+
+            Console.Write("Would you like to upload a cover image? (y/n): ");
+            string? hasImg = Console.ReadLine();
+            if (hasImg == "" || (hasImg != "y" && hasImg != "n")) { Console.WriteLine("\nInvalid input. Enter 'y' or 'n'."); return true; }
+
+            string payload = $"{className}|{desc}|{quotas}|{date}|{time}|{duration}|{hasImg}|{userLogged}";
+            byte[] data = Encoding.UTF8.GetBytes(payload);
+            ndh.Send(BitConverter.GetBytes(data.Length));
+            ndh.Send(data);
+
+            if (hasImg == "y")
+            {
+                Console.Write("Type the image path: ");
+                string? filePath = Console.ReadLine();
+                FileInfo fi = new FileInfo(filePath);
+                string fileName = fi.Name;
+                byte[] fn = Encoding.UTF8.GetBytes(fileName);
+                ndh.Send(BitConverter.GetBytes(fn.Length));
+                ndh.Send(fn);
+                ndh.Send(BitConverter.GetBytes(fi.Length));
+
+                long offset = 0;
+                long partCount = Protocol.CalculateFileParts(fi.Length);
+                long currentPart = 1;
+                FileStreamHelper fsh = new FileStreamHelper();
+
+                while (offset < fi.Length)
+                {
+                    byte[] buffer;
+                    bool last = currentPart == partCount;
+                    if (!last) { buffer = fsh.Read(filePath, offset, Protocol.MaxFileChunkSize); offset += Protocol.MaxFileChunkSize; }
+                    else { long lastSize = fi.Length - offset; buffer = fsh.Read(filePath, offset, (int)lastSize); offset += lastSize; }
+                    ndh.Send(buffer);
+                    currentPart++;
+                }
+            }
+
+            bool created = BitConverter.ToBoolean(ndh.Receive(1));
+            Console.WriteLine(created ? "\nClass created successfully." : "\nClass creation failed, try again.");
+            return true;
         }
     }
 }

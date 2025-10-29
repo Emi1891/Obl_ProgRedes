@@ -1,18 +1,20 @@
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace Dominio;
-public class Usuario{
-    public string nombre;
-    public string contrasena;
-    public List<Clase> clasesCreadas;
+namespace Dominio
+{
+    public class Usuario
+    {
+        public string nombre;
+        public string contrasena;
+        public List<Clase> clasesCreadas;
+        public List<HistorialItem> Historial;
 
-    public Usuario(string nombre, string contrasena){
-        this.nombre = nombre;
-        this.contrasena = contrasena;
-        this.clasesCreadas = new List<Clase>();
+        public Usuario(string nombre, string contrasena)
+        {
+            this.nombre = nombre;
+            this.contrasena = contrasena;
+            this.clasesCreadas = new List<Clase>();
+            this.Historial = new List<HistorialItem>();
+        }
     }
 }
