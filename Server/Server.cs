@@ -261,10 +261,10 @@ namespace Server
 
         static void SendClassListByName(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
-            data.Sort((c1, c2) => string.Compare(c1.Nombre, c2.Nombre, StringComparison.Ordinal));
-            int cantClases = data.Count;
+            var ordered = data.OrderBy(c => c.Nombre, StringComparer.Ordinal).ToList();
+            int cantClases = ordered.Count;
             networkDataHelper.Send(BitConverter.GetBytes(cantClases));
-            foreach (var clase in data)
+            foreach (var clase in ordered)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
                 SendSomething(networkDataHelper, claseInfo);
@@ -273,10 +273,10 @@ namespace Server
         }
         static void SendClassListByDate(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
-            data.Sort((c1, c2) => DateTime.Compare(c1.Fecha, c2.Fecha));
-            int cantClases = data.Count;
+            var ordered = data.OrderBy(c => c.Fecha).ToList();
+            int cantClases = ordered.Count;
             networkDataHelper.Send(BitConverter.GetBytes(cantClases));
-            foreach (var clase in data)
+            foreach (var clase in ordered)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
                 SendSomething(networkDataHelper, claseInfo);
@@ -285,10 +285,10 @@ namespace Server
 
         static void SendClassListByQuota(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
-            data.Sort((c1, c2) => c1.CuposDisponibles.CompareTo(c2.CuposDisponibles));
-            int cantClases = data.Count;
+            var ordered = data.OrderBy(c => c.CuposDisponibles).ToList();
+            int cantClases = ordered.Count;
             networkDataHelper.Send(BitConverter.GetBytes(cantClases));
-            foreach (var clase in data)
+            foreach (var clase in ordered)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
                 SendSomething(networkDataHelper, claseInfo);

@@ -290,7 +290,7 @@ namespace Client
             {
                 int classDataLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
                 string[] classDataSplit = Encoding.UTF8.GetString(networkDataHelper.Receive(classDataLength)).Split('|');
-                    int classDataLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
+
                 Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
                 Console.WriteLine($"Description: {classDataSplit[1]}");
                 Console.WriteLine($"Date: {classDataSplit[3]}");
@@ -303,10 +303,9 @@ namespace Client
 
                 imgUrls.Add(new string[] { (i + 1).ToString(), classDataSplit[6], classDataSplit[0] });
             }
-                    imgUrls.Add(new string[] { (i + 1).ToString(), classDataSplit[6], classDataSplit[0] });
-                }
-
         }
+
+        
 
         internal static bool ListClasses(NetworkDataHelper networkDataHelper)
         {
@@ -324,8 +323,8 @@ namespace Client
 
                 networkDataHelper.Send(BitConverter.GetBytes(0));
                 var optionSort = Console.ReadLine();
-                networkDataHelper.Send(BitConverter.GetBytes(int.Parse(optionSort ?? "1")));
-
+                int sortOption = int.Parse(optionSort ?? "1");
+                networkDataHelper.Send(BitConverter.GetBytes(sortOption));
 
 
 
@@ -341,25 +340,25 @@ namespace Client
                 bool wantImg = false;
                 Console.Write("\nTo download any cover image, choose the desired class. Otherwise, type 'q': ");
                 string? opt = Console.ReadLine();
-                if (string.IsNullOrWhiteSpace(opt) || opt == "q") { ndh.Send(BitConverter.GetBytes(wantImg)); return true; }
+                if (string.IsNullOrWhiteSpace(opt) || opt == "q") { networkDataHelper.Send(BitConverter.GetBytes(wantImg)); return true; }
 
                 int chosen = int.Parse(opt);
-                if (chosen > classCount || chosen < 1) { Console.WriteLine("\nInvalid input."); ndh.Send(BitConverter.GetBytes(wantImg)); return true; }
+                if (chosen > classCount || chosen < 1) { Console.WriteLine("\nInvalid input."); networkDataHelper.Send(BitConverter.GetBytes(wantImg)); return true; }
 
                 string path = imgUrls.Find(c => int.Parse(c[0]) == chosen)![1];
                 className = imgUrls.Find(c => int.Parse(c[0]) == chosen)![2];
-                if (path == "No image uploaded") { Console.WriteLine("\nThe selected class has no cover image."); ndh.Send(BitConverter.GetBytes(wantImg)); return true; }
+                if (path == "No image uploaded") { Console.WriteLine("\nThe selected class has no cover image."); networkDataHelper.Send(BitConverter.GetBytes(wantImg)); return true; }
 
                 wantImg = true;
-                ndh.Send(BitConverter.GetBytes(wantImg));
+                networkDataHelper.Send(BitConverter.GetBytes(wantImg));
 
                 byte[] pb = Encoding.UTF8.GetBytes(path);
-                ndh.Send(BitConverter.GetBytes(pb.Length));
-                ndh.Send(pb);
+                networkDataHelper.Send(BitConverter.GetBytes(pb.Length));
+                networkDataHelper.Send(pb);
 
-                int fileNameLength = BitConverter.ToInt32(ndh.Receive(Protocol.FileNameLenghtSize));
-                fileName = Encoding.UTF8.GetString(ndh.Receive(fileNameLength));
-                long fileSize = BitConverter.ToInt64(ndh.Receive(Protocol.FileSizeLenghtSize));
+                int fileNameLength = BitConverter.ToInt32(networkDataHelper.Receive(Protocol.FileNameLenghtSize));
+                fileName = Encoding.UTF8.GetString(networkDataHelper.Receive(fileNameLength));
+                long fileSize = BitConverter.ToInt64(networkDataHelper.Receive(Protocol.FileSizeLenghtSize));
 
                 long offset = 0;
                 long partCount = Protocol.CalculateFileParts(fileSize);
@@ -372,13 +371,13 @@ namespace Client
                     bool last = currentPart == partCount;
                     if (!last)
                     {
-                        buffer = ndh.Receive(Protocol.MaxFileChunkSize);
+                        buffer = networkDataHelper.Receive(Protocol.MaxFileChunkSize);
                         offset += Protocol.MaxFileChunkSize;
                     }
                     else
                     {
                         long lastSize = fileSize - offset;
-                        buffer = ndh.Receive((int)lastSize);
+                        buffer = networkDataHelper.Receive((int)lastSize);
                         offset += lastSize;
                     }
                     Directory.CreateDirectory($"Images/{className}");
