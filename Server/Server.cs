@@ -237,22 +237,85 @@ namespace Server
             if (validUser) Console.WriteLine($"User {username} logged in.");
             return validUser;
         }
+        static void SendSomething(NetworkDataHelper networkDataHelper, string data)
+        {
+            byte[] dataInfoBytes = Encoding.UTF8.GetBytes(data);
+            networkDataHelper.Send(BitConverter.GetBytes(dataInfoBytes.Length));
+            networkDataHelper.Send(dataInfoBytes);
+        }
+
+        static void SendClassListNormal(NetworkDataHelper networkDataHelper, List<Clase> data)
+        {
+            int cantClases = data.Count;
+            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            foreach (var clase in data)
+            {
+                string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
+                SendSomething(networkDataHelper, claseInfo);
+            }
+
+        }
+
+        static void SendClassListByName(NetworkDataHelper networkDataHelper, List<Clase> data)
+        {
+            data.Sort((c1, c2) => string.Compare(c1.Nombre, c2.Nombre, StringComparison.Ordinal));
+            int cantClases = data.Count;
+            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            foreach (var clase in data)
+            {
+                string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
+                SendSomething(networkDataHelper, claseInfo);
+            }
+
+        }
+        static void SendClassListByDate(NetworkDataHelper networkDataHelper, List<Clase> data)
+        {
+            data.Sort((c1, c2) => DateTime.Compare(c1.Fecha, c2.Fecha));
+            int cantClases = data.Count;
+            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            foreach (var clase in data)
+            {
+                string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
+                SendSomething(networkDataHelper, claseInfo);
+            }
+        }
+
+        static void SendClassListByQuota(NetworkDataHelper networkDataHelper, List<Clase> data)
+        {
+            data.Sort((c1, c2) => c1.CuposDisponibles.CompareTo(c2.CuposDisponibles));
+            int cantClases = data.Count;
+            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            foreach (var clase in data)
+            {
+                string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
+                SendSomething(networkDataHelper, claseInfo);
+            }
+        }
 
         static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
         {
             try
             {
+                
+                int sortOption = 1;
+
+                if (data != null && data.Length > 0)
+                {
+                    string optionStr = Encoding.UTF8.GetString(data);
+                    if (!int.TryParse(optionStr, out sortOption)) sortOption = 1;
+                }
+                else
+                {
+                    byte[] sortBytes = networkDataHelper.Receive(sizeof(int));
+                    sortOption = BitConverter.ToInt32(sortBytes);
+                }
+
                 lock (clasesLock)
                 {
-                    int cantClases = classes.Count;
-                    networkDataHelper.Send(BitConverter.GetBytes(cantClases));
-                    foreach (var clase in classes)
-                    {
-                        string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
-                        byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
-                        networkDataHelper.Send(BitConverter.GetBytes(claseInfoBytes.Length));
-                        networkDataHelper.Send(claseInfoBytes);
-                    }
+                    if (sortOption == 1) { SendClassListByName(networkDataHelper, classes); }
+                    else if (sortOption == 2) { SendClassListByDate(networkDataHelper, classes); }
+                    else if (sortOption == 3) { SendClassListByQuota(networkDataHelper, classes); }
+                    else { SendClassListNormal(networkDataHelper, classes); }
                 }
 
                 bool needToSendImg = BitConverter.ToBoolean(networkDataHelper.Receive(1));
@@ -292,7 +355,7 @@ namespace Server
                             else
                             {
                                 long lastPartSize = fileInfo.Length - offset;
-                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
+                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {lastPartSize}.");
                                 buffer = fsh.Read(path, offset, (int)lastPartSize);
                                 offset += lastPartSize;
                             }
@@ -451,7 +514,7 @@ namespace Server
             if (!okQuota || !okDur) { dataHelper.Send(BitConverter.GetBytes(false)); return false; }
 
             Usuario owner;
-            lock (usersLock) { owner = users.FirstOrDefault(u => string.Equals(user, u.nombre, StringComparison.Ordinal)); }
+            lock (usersLock) { owner = users.FirstOrDefault(u => u.nombre == user); }
             if (owner == null) { dataHelper.Send(BitConverter.GetBytes(false)); return false; }
 
             string fileName = "";

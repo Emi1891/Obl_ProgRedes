@@ -256,6 +256,27 @@ namespace Client
                 return false;
             }
         }
+        internal static void ShowClases(int classCount, NetworkDataHelper networkDataHelper, List<string[]> imgUrls)
+        {
+            for (int i = 0; i < classCount; i++)
+            {
+                int classDataLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
+                string[] classDataSplit = Encoding.UTF8.GetString(networkDataHelper.Receive(classDataLength)).Split('|');
+
+                Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
+                Console.WriteLine($"Description: {classDataSplit[1]}");
+                Console.WriteLine($"Date: {classDataSplit[3]}");
+                Console.WriteLine($"Time: {classDataSplit[4]}");
+                Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
+                Console.WriteLine($"Taken places: {classDataSplit[2]}");
+                Console.WriteLine($"Creator: {classDataSplit[7]}");
+                Console.WriteLine($"Link: {classDataSplit[8]}");
+                Console.WriteLine($"Has cover image: {(classDataSplit[6] == "No image uploaded" ? "No" : "Yes")}");
+
+                imgUrls.Add(new string[] { (i + 1).ToString(), classDataSplit[6], classDataSplit[0] });
+            }
+
+        }
 
         internal static bool ListClasses(NetworkDataHelper networkDataHelper)
         {
@@ -264,31 +285,28 @@ namespace Client
 
             try
             {
+                Console.WriteLine("\nOrder by: ");
+                Console.WriteLine("\n1. Name ");
+                Console.WriteLine("\n2. Date");
+                Console.WriteLine("\n3. Quota");
+
+
+
                 networkDataHelper.Send(BitConverter.GetBytes(0));
+                var optionSort = Console.ReadLine();
+                networkDataHelper.Send(BitConverter.GetBytes(int.Parse(optionSort ?? "1")));
+
+
+
 
                 int classCount = BitConverter.ToInt32(networkDataHelper.Receive(4));
                 if (classCount == 0) { Console.WriteLine("\nNo classes available."); return true; }
 
                 Console.WriteLine($"\nThere are {classCount} classes available:");
                 var imgUrls = new List<string[]>();
+                ShowClases(classCount, networkDataHelper, imgUrls);
 
-                for (int i = 0; i < classCount; i++)
-                {
-                    int classDataLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                    string[] classDataSplit = Encoding.UTF8.GetString(networkDataHelper.Receive(classDataLength)).Split('|');
 
-                    Console.WriteLine($"\nClass {i + 1}: {classDataSplit[0]}");
-                    Console.WriteLine($"Description: {classDataSplit[1]}");
-                    Console.WriteLine($"Date: {classDataSplit[3]}");
-                    Console.WriteLine($"Time: {classDataSplit[4]}");
-                    Console.WriteLine($"Duration: {classDataSplit[5]} minutes");
-                    Console.WriteLine($"Taken places: {classDataSplit[2]}");
-                    Console.WriteLine($"Creator: {classDataSplit[7]}");
-                    Console.WriteLine($"Link: {classDataSplit[8]}");
-                    Console.WriteLine($"Has cover image: {(classDataSplit[6] == "No image uploaded" ? "No" : "Yes")}");
-
-                    imgUrls.Add(new string[] { (i + 1).ToString(), classDataSplit[6], classDataSplit[0] });
-                }
 
                 bool wantImg = false;
                 Console.Write("\nTo download any cover image, choose the desired class. Otherwise, type 'q': ");
