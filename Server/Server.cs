@@ -9,6 +9,7 @@ using Common;
 using Dominio;
 using System.IO;
 using System.Globalization;
+using System.Threading;
 
 namespace Server
 {
@@ -29,6 +30,10 @@ namespace Server
         static readonly Dictionary<string, HashSet<string>> cancellations = new Dictionary<string, HashSet<string>>();
         static readonly object cancelLock = new object();
 
+        // Report cancellation support
+        static CancellationTokenSource? reportCts = null;
+        static readonly object reportLock = new object();
+
         static volatile bool running = true;
 
         static async Task Main(string[] args)
@@ -46,6 +51,7 @@ namespace Server
             Console.WriteLine("Starting Server Application ... ");
             Console.WriteLine("\nPress 'q' and 'Enter' at any time while not handling a client to stop the server.\n");
             Console.WriteLine("Type 'r' or 'report' and press Enter to print the classes report.\n");
+            Console.WriteLine("Type 'c' or 'cancel' and press Enter to cancel a running report.\n");
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
@@ -72,7 +78,55 @@ namespace Server
                     }
                     else if (input == "r" || input == "report")
                     {
-                        try { PrintClassesReport(); } catch (Exception e) { Console.WriteLine($"Error generating report: {e.Message}"); }
+                        lock (reportLock)
+                        {
+                            if (reportCts != null)
+                            {
+                                Console.WriteLine("A report is already running. Use 'c' or 'cancel' to cancel it.");
+                                continue;
+                            }
+
+                            reportCts = new CancellationTokenSource();
+                            var localCts = reportCts;
+
+                            _ = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await PrintClassesReportAsync(localCts.Token).ConfigureAwait(false);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    Console.WriteLine("Report generation cancelled.");
+                                }
+                                catch (Exception e)
+                                {
+                                    Console.WriteLine($"Error generating report: {e.Message}");
+                                }
+                                finally
+                                {
+                                    lock (reportLock)
+                                    {
+                                        if (reportCts == localCts) reportCts = null;
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    else if (input == "c" || input == "cancel")
+                    {
+                        lock (reportLock)
+                        {
+                            if (reportCts == null)
+                            {
+                                Console.WriteLine("No report is running.");
+                            }
+                            else
+                            {
+                                Console.WriteLine("Cancelling report...");
+                                try { reportCts.Cancel(); } catch { }
+                            }
+                        }
                     }
                 }
             });
@@ -128,20 +182,26 @@ namespace Server
             }
         }
 
-        // Report generation: prints requested statistics to console
-        static void PrintClassesReport()
+        // Report generation: prints requested statistics to console (cancellable)
+        static async Task PrintClassesReportAsync(CancellationToken ct)
         {
             List<Clase> snapshot;
             lock (clasesLock)
             {
-                snapshot = classes.ToList();
+                snapshot = classes.Where(c => c.Fecha.Date == DateTime.Today).ToList();
             }
+
+            ct.ThrowIfCancellationRequested();
 
             int totalClases = snapshot.Count;
             double promedioDuracion = totalClases == 0 ? 0 : snapshot.Average(c => (double)c.Duracion);
 
+            ct.ThrowIfCancellationRequested();
+
             int totalInscriptos = snapshot.Sum(c => c.usuarios?.Count ?? 0);
             double promedioInscriptos = totalClases == 0 ? 0 : (double)totalInscriptos / totalClases;
+
+            ct.ThrowIfCancellationRequested();
 
             var clasesConImagen = snapshot.Where(c => !string.IsNullOrWhiteSpace(c.UrlFoto)).ToList();
             int cantidadClasesConImagen = clasesConImagen.Count;
@@ -150,6 +210,7 @@ namespace Server
             int imagenesEncontradas = 0;
             foreach (var c in clasesConImagen)
             {
+                ct.ThrowIfCancellationRequested();
                 try
                 {
                     if (File.Exists(c.UrlFoto))
@@ -160,11 +221,16 @@ namespace Server
                     }
                 }
                 catch { }
+
+                // Simulate longer work granularity so cancellation can be observed on large sets
+                await Task.Yield();
             }
+
+            ct.ThrowIfCancellationRequested();
 
             double promedioTamImagen = imagenesEncontradas == 0 ? 0 : (double)tamañoTotalImagenes / imagenesEncontradas;
 
-            Console.WriteLine("\n=== REPORT: Classes statistics ===");
+            Console.WriteLine($"\n=== REPORT: Estadisticas de clases de hoy ({DateTime.Today:dd-MM-yyyy})===");
             Console.WriteLine($"Cantidad de clases totales: {totalClases}");
             Console.WriteLine($"Promedio de duración (minutos): {promedioDuracion:F2}");
             Console.WriteLine($"Cantidad total de inscriptos: {totalInscriptos}");
@@ -173,6 +239,8 @@ namespace Server
             Console.WriteLine($"Tamaño total de las imágenes de portada (bytes): {tamañoTotalImagenes}");
             Console.WriteLine($"Promedio de tamaño de las imágenes de portada (bytes): {promedioTamImagen:F2}");
             Console.WriteLine("===================================\n");
+
+            await Task.CompletedTask.ConfigureAwait(false);
         }
 
         static async Task HandleClientAsync(Socket clientSocket, int clientNum)
