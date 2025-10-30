@@ -45,6 +45,7 @@ namespace Server
 
             Console.WriteLine("Starting Server Application ... ");
             Console.WriteLine("\nPress 'q' and 'Enter' at any time while not handling a client to stop the server.\n");
+            Console.WriteLine("Type 'r' or 'report' and press Enter to print the classes report.\n");
 
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
@@ -54,17 +55,24 @@ namespace Server
             listener.Start();
             Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
-            // Console key listener runs on a background task so we can stop the listener with 'q'
+            // Console key listener runs on a background task so we can stop the listener with 'q' and request reports
             _ = Task.Run(() =>
             {
                 while (running)
                 {
                     string? input = Console.ReadLine();
-                    if (input != null && input.ToLower() == "q")
+                    if (input == null) continue;
+                    input = input.Trim().ToLowerInvariant();
+                    if (input == "q")
                     {
                         Console.WriteLine("\nShutting server down...\n");
                         running = false;
                         try { listener.Stop(); } catch { }
+                        break;
+                    }
+                    else if (input == "r" || input == "report")
+                    {
+                        try { PrintClassesReport(); } catch (Exception e) { Console.WriteLine($"Error generating report: {e.Message}"); }
                     }
                 }
             });
@@ -118,6 +126,53 @@ namespace Server
             {
                 try { listener.Stop(); } catch { }
             }
+        }
+
+        // Report generation: prints requested statistics to console
+        static void PrintClassesReport()
+        {
+            List<Clase> snapshot;
+            lock (clasesLock)
+            {
+                snapshot = classes.ToList();
+            }
+
+            int totalClases = snapshot.Count;
+            double promedioDuracion = totalClases == 0 ? 0 : snapshot.Average(c => (double)c.Duracion);
+
+            int totalInscriptos = snapshot.Sum(c => c.usuarios?.Count ?? 0);
+            double promedioInscriptos = totalClases == 0 ? 0 : (double)totalInscriptos / totalClases;
+
+            var clasesConImagen = snapshot.Where(c => !string.IsNullOrWhiteSpace(c.UrlFoto)).ToList();
+            int cantidadClasesConImagen = clasesConImagen.Count;
+
+            long tamañoTotalImagenes = 0;
+            int imagenesEncontradas = 0;
+            foreach (var c in clasesConImagen)
+            {
+                try
+                {
+                    if (File.Exists(c.UrlFoto))
+                    {
+                        var fi = new FileInfo(c.UrlFoto);
+                        tamañoTotalImagenes += fi.Length;
+                        imagenesEncontradas++;
+                    }
+                }
+                catch { }
+            }
+
+            double promedioTamImagen = imagenesEncontradas == 0 ? 0 : (double)tamañoTotalImagenes / imagenesEncontradas;
+
+            Console.WriteLine("\n=== REPORT: Classes statistics ===");
+            Console.WriteLine($"Cantidad de clases totales: {totalClases}");
+            Console.WriteLine($"Promedio de duración (minutos): {promedioDuracion:F2}");
+            Console.WriteLine($"Cantidad total de inscriptos: {totalInscriptos}");
+            Console.WriteLine($"Promedio de inscriptos por clase: {promedioInscriptos:F2}");
+            Console.WriteLine($"Cantidad de clases con imagen de portada: {cantidadClasesConImagen}");
+            Console.WriteLine($"Tamaño total de las imágenes de portada (bytes): {tamañoTotalImagenes}");
+            Console.WriteLine($"Promedio de tamaño de las imágenes de portada (bytes): {promedioTamImagen:F2}");
+            Console.WriteLine("===================================\n");
         }
 
         static async Task HandleClientAsync(Socket clientSocket, int clientNum)
@@ -259,6 +314,12 @@ namespace Server
             string password = nameAndPass[1];
 
             bool added = false;
+            lock (usersLock)
+            {
+                bool exists = users.Any(u => string.Equals(username, u.nombre, StringComparison.Ordinal));
+            }
+
+            // ensure addition is done under lock
             lock (usersLock)
             {
                 bool exists = users.Any(u => string.Equals(username, u.nombre, StringComparison.Ordinal));
