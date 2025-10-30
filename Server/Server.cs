@@ -4,10 +4,11 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Threading;
+using System.Threading.Tasks;
 using Common;
 using Dominio;
 using System.IO;
+using System.Globalization;
 
 namespace Server
 {
@@ -30,7 +31,7 @@ namespace Server
 
         static volatile bool running = true;
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             users.Add(new Usuario("1", "1"));
 
@@ -45,17 +46,16 @@ namespace Server
             Console.WriteLine("Starting Server Application ... ");
             Console.WriteLine("\nPress 'q' and 'Enter' at any time while not handling a client to stop the server.\n");
 
-            var serverSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-
             IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
             int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
             var serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
-            serverSocket.Bind(serverEndPoint);
-            serverSocket.Listen();
+            var listener = new TcpListener(serverEndPoint);
+            listener.Start();
             Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
-            var keyListener = new Thread(() =>
+            // Console key listener runs on a background task so we can stop the listener with 'q'
+            _ = Task.Run(() =>
             {
                 while (running)
                 {
@@ -64,19 +64,30 @@ namespace Server
                     {
                         Console.WriteLine("\nShutting server down...\n");
                         running = false;
-                        try { serverSocket.Close(); } catch { }
+                        try { listener.Stop(); } catch { }
                     }
-                    Thread.Sleep(100);
                 }
-            })
-            { IsBackground = true };
-            keyListener.Start();
+            });
 
             try
             {
                 while (running)
                 {
-                    Socket clientSocket = serverSocket.Accept();
+                    TcpClient tcpClient;
+                    try
+                    {
+                        tcpClient = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        break; // listener stopped
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        break;
+                    }
+
+                    var clientSocket = tcpClient.Client;
 
                     bool admit;
                     lock (clientThreadsLock)
@@ -95,19 +106,21 @@ namespace Server
                     int clientNum = currentClients;
                     Console.WriteLine($"Client connected. Current clients: {currentClients}");
 
-                    var clientThread = new Thread(() => HandleClient(clientSocket, clientNum)) { IsBackground = true };
-                    clientThread.Start();
+                    // Fire-and-forget client handler (exceptions handled inside)
+                    _ = Task.Run(() => HandleClientAsync(clientSocket, clientNum));
                 }
-                serverSocket.Shutdown(SocketShutdown.Both);
-                serverSocket.Close();
             }
             catch (SocketException)
             {
                 Console.WriteLine("Server closed correctly.");
             }
+            finally
+            {
+                try { listener.Stop(); } catch { }
+            }
         }
 
-        static void HandleClient(Socket clientSocket, int clientNum)
+        static async Task HandleClientAsync(Socket clientSocket, int clientNum)
         {
             bool connected = true;
             bool clientLogged = false;
@@ -122,18 +135,34 @@ namespace Server
                     {
                         try
                         {
-                            byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
-                            byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
-                            string commandString = Encoding.UTF8.GetString(commandStringBytes);
-                            Command command = (Command)int.Parse(commandString);
+                            byte[] messageType = await networkDataHelper.ReceiveAsync(Protocol.MessageTypeLength).ConfigureAwait(false);
+                            byte[] commandStringBytes = await networkDataHelper.ReceiveAsync(Protocol.CommandStringLength).ConfigureAwait(false);
+                            string commandString = Encoding.UTF8.GetString(commandStringBytes).Trim('\0').Trim();
 
-                            int length = BitConverter.ToInt32(networkDataHelper.Receive(sizeof(int)));
-                            byte[] commandData = length > 0 ? networkDataHelper.Receive(length) : Array.Empty<byte>();
+                            if (!int.TryParse(commandString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int cmdInt) || !Enum.IsDefined(typeof(Command), cmdInt))
+                            {
+                                Console.WriteLine($"Invalid pre-login command from client {clientNum}: '{commandString}'");
+                                connected = false;
+                                break;
+                            }
+
+                            Command command = (Command)cmdInt;
+
+                            byte[] lengthBytes = await networkDataHelper.ReceiveAsync(sizeof(int)).ConfigureAwait(false);
+                            int length = BitConverter.ToInt32(lengthBytes, 0);
+                            if (length < 0)
+                            {
+                                Console.WriteLine($"Invalid length received from client {clientNum}: {length}");
+                                connected = false;
+                                break;
+                            }
+
+                            byte[] commandData = length > 0 ? await networkDataHelper.ReceiveAsync(length).ConfigureAwait(false) : Array.Empty<byte>();
 
                             switch (command)
                             {
-                                case Command.Register: HandleRegister(networkDataHelper, commandData); break;
-                                case Command.Login: clientLogged = HandleLogin(networkDataHelper, commandData); break;
+                                case Command.Register: await HandleRegisterAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
+                                case Command.Login: clientLogged = await HandleLoginAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
                                 default: Console.WriteLine($"Unknown pre-login command from client {clientNum}: {command}"); break;
                             }
                         }
@@ -153,23 +182,39 @@ namespace Server
                     {
                         try
                         {
-                            byte[] messageType = networkDataHelper.Receive(Protocol.MessageTypeLength);
-                            byte[] commandStringBytes = networkDataHelper.Receive(Protocol.CommandStringLength);
-                            string commandString = Encoding.UTF8.GetString(commandStringBytes);
-                            CommandLogged commandLogged = (CommandLogged)int.Parse(commandString);
+                            byte[] messageType = await networkDataHelper.ReceiveAsync(Protocol.MessageTypeLength).ConfigureAwait(false);
+                            byte[] commandStringBytes = await networkDataHelper.ReceiveAsync(Protocol.CommandStringLength).ConfigureAwait(false);
+                            string commandString = Encoding.UTF8.GetString(commandStringBytes).Trim('\0').Trim();
 
-                            int length = BitConverter.ToInt32(networkDataHelper.Receive(sizeof(int)));
-                            byte[] commandData = length > 0 ? networkDataHelper.Receive(length) : Array.Empty<byte>();
+                            if (!int.TryParse(commandString, NumberStyles.Integer, CultureInfo.InvariantCulture, out int cmdInt) || !Enum.IsDefined(typeof(CommandLogged), cmdInt))
+                            {
+                                Console.WriteLine($"Invalid logged-in command from client {clientNum}: '{commandString}'");
+                                connected = false;
+                                break;
+                            }
+
+                            CommandLogged commandLogged = (CommandLogged)cmdInt;
+
+                            byte[] lengthBytes = await networkDataHelper.ReceiveAsync(sizeof(int)).ConfigureAwait(false);
+                            int length = BitConverter.ToInt32(lengthBytes, 0);
+                            if (length < 0)
+                            {
+                                Console.WriteLine($"Invalid length received from client {clientNum}: {length}");
+                                connected = false;
+                                break;
+                            }
+
+                            byte[] commandData = length > 0 ? await networkDataHelper.ReceiveAsync(length).ConfigureAwait(false) : Array.Empty<byte>();
 
                             switch (commandLogged)
                             {
-                                case CommandLogged.CreateClass: HandleCreateClass(networkDataHelper, commandData); break;
-                                case CommandLogged.JoinClass: HandleJoinClass(networkDataHelper); break;
-                                case CommandLogged.ListClasses: HandleListClasses(networkDataHelper, commandData); break;
-                                case CommandLogged.LeaveClass: HandleLeaveClass(networkDataHelper, commandData); break;
-                                case CommandLogged.EditClass: HandleEditClass(networkDataHelper, commandData); break;
-                                case CommandLogged.History: HandleHistory(networkDataHelper, commandData); break;
-                                case CommandLogged.Exit: HandleLogout(networkDataHelper, commandData); clientLogged = false; break;
+                                case CommandLogged.CreateClass: await HandleCreateClassAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
+                                case CommandLogged.JoinClass: await HandleJoinClassAsync(networkDataHelper).ConfigureAwait(false); break;
+                                case CommandLogged.ListClasses: await HandleListClassesAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
+                                case CommandLogged.LeaveClass: await HandleLeaveClassAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
+                                case CommandLogged.EditClass: await HandleEditClassAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
+                                case CommandLogged.History: await HandleHistoryAsync(networkDataHelper, commandData).ConfigureAwait(false); break;
+                                case CommandLogged.Exit: await HandleLogoutAsync(networkDataHelper, commandData).ConfigureAwait(false); clientLogged = false; break;
                                 default: Console.WriteLine($"Unknown logged-in command from client {clientNum}: {commandLogged}"); break;
                             }
                         }
@@ -194,11 +239,11 @@ namespace Server
             }
         }
 
-        static void HandleLogout(NetworkDataHelper networkDataHelper, byte[] commandData)
+        static async Task HandleLogoutAsync(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             try
             {
-                networkDataHelper.Send(BitConverter.GetBytes(true));
+                await networkDataHelper.SendAsync(BitConverter.GetBytes(true)).ConfigureAwait(false);
             }
             catch (SocketException)
             {
@@ -206,7 +251,7 @@ namespace Server
             }
         }
 
-        static void HandleRegister(NetworkDataHelper networkDataHelper, byte[] commandData)
+        static async Task HandleRegisterAsync(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
             string[] nameAndPass = dataString.Split('|');
@@ -220,10 +265,10 @@ namespace Server
                 if (!exists) { users.Add(new Usuario(username, password)); added = true; }
             }
 
-            networkDataHelper.Send(BitConverter.GetBytes(added));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(added)).ConfigureAwait(false);
         }
 
-        static bool HandleLogin(NetworkDataHelper networkDataHelper, byte[] commandData)
+        static async Task<bool> HandleLoginAsync(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
             string[] nameAndPass = dataString.Split('|');
@@ -236,70 +281,69 @@ namespace Server
                 validUser = users.Any(u => string.Equals(username, u.nombre, StringComparison.Ordinal) && u.contrasena == password);
             }
 
-            networkDataHelper.Send(BitConverter.GetBytes(validUser));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(validUser)).ConfigureAwait(false);
             if (validUser) Console.WriteLine($"User {username} logged in.");
             return validUser;
         }
-        static void SendSomething(NetworkDataHelper networkDataHelper, string data)
+
+        static async Task SendSomethingAsync(NetworkDataHelper networkDataHelper, string data)
         {
             byte[] dataInfoBytes = Encoding.UTF8.GetBytes(data);
-            networkDataHelper.Send(BitConverter.GetBytes(dataInfoBytes.Length));
-            networkDataHelper.Send(dataInfoBytes);
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(dataInfoBytes.Length)).ConfigureAwait(false);
+            await networkDataHelper.SendAsync(dataInfoBytes).ConfigureAwait(false);
         }
 
-        static void SendClassListNormal(NetworkDataHelper networkDataHelper, List<Clase> data)
+        static async Task SendClassListNormalAsync(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
             int cantClases = data.Count;
-            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(cantClases)).ConfigureAwait(false);
             foreach (var clase in data)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
-                SendSomething(networkDataHelper, claseInfo);
+                await SendSomethingAsync(networkDataHelper, claseInfo).ConfigureAwait(false);
             }
-
         }
 
-        static void SendClassListByName(NetworkDataHelper networkDataHelper, List<Clase> data)
+        static async Task SendClassListByNameAsync(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
             var ordered = data.OrderBy(c => c.Nombre, StringComparer.Ordinal).ToList();
             int cantClases = ordered.Count;
-            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(cantClases)).ConfigureAwait(false);
             foreach (var clase in ordered)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
-                SendSomething(networkDataHelper, claseInfo);
+                await SendSomethingAsync(networkDataHelper, claseInfo).ConfigureAwait(false);
             }
-
         }
-        static void SendClassListByDate(NetworkDataHelper networkDataHelper, List<Clase> data)
+
+        static async Task SendClassListByDateAsync(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
             var ordered = data.OrderBy(c => c.Fecha).ToList();
             int cantClases = ordered.Count;
-            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(cantClases)).ConfigureAwait(false);
             foreach (var clase in ordered)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
-                SendSomething(networkDataHelper, claseInfo);
+                await SendSomethingAsync(networkDataHelper, claseInfo).ConfigureAwait(false);
             }
         }
 
-        static void SendClassListByQuota(NetworkDataHelper networkDataHelper, List<Clase> data)
+        static async Task SendClassListByQuotaAsync(NetworkDataHelper networkDataHelper, List<Clase> data)
         {
             var ordered = data.OrderBy(c => c.CuposDisponibles).ToList();
             int cantClases = ordered.Count;
-            networkDataHelper.Send(BitConverter.GetBytes(cantClases));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(cantClases)).ConfigureAwait(false);
             foreach (var clase in ordered)
             {
                 string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora:HH:mm}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}|{clase.Link}";
-                SendSomething(networkDataHelper, claseInfo);
+                await SendSomethingAsync(networkDataHelper, claseInfo).ConfigureAwait(false);
             }
         }
 
-        static void HandleListClasses(NetworkDataHelper networkDataHelper, byte[] data)
+        static async Task HandleListClassesAsync(NetworkDataHelper networkDataHelper, byte[] data)
         {
             try
             {
-                
                 int sortOption = 1;
 
                 if (data != null && data.Length > 0)
@@ -309,61 +353,58 @@ namespace Server
                 }
                 else
                 {
-                    byte[] sortBytes = networkDataHelper.Receive(sizeof(int));
-                    sortOption = BitConverter.ToInt32(sortBytes);
+                    byte[] sortBytes = await networkDataHelper.ReceiveAsync(sizeof(int)).ConfigureAwait(false);
+                    sortOption = BitConverter.ToInt32(sortBytes, 0);
                 }
 
-                lock (clasesLock)
-                {
-                    if (sortOption == 1) { SendClassListByName(networkDataHelper, classes); }
-                    else if (sortOption == 2) { SendClassListByDate(networkDataHelper, classes); }
-                    else if (sortOption == 3) { SendClassListByQuota(networkDataHelper, classes); }
-                    else { SendClassListNormal(networkDataHelper, classes); }
-                }
+                List<Clase> snapshot;
+                lock (clasesLock) { snapshot = classes.ToList(); }
 
-                bool needToSendImg = BitConverter.ToBoolean(networkDataHelper.Receive(1));
+                if (sortOption == 1) await SendClassListByNameAsync(networkDataHelper, snapshot).ConfigureAwait(false);
+                else if (sortOption == 2) await SendClassListByDateAsync(networkDataHelper, snapshot).ConfigureAwait(false);
+                else if (sortOption == 3) await SendClassListByQuotaAsync(networkDataHelper, snapshot).ConfigureAwait(false);
+                else await SendClassListNormalAsync(networkDataHelper, snapshot).ConfigureAwait(false);
+
+                byte[] needImgBytes = await networkDataHelper.ReceiveAsync(1).ConfigureAwait(false);
+                bool needToSendImg = BitConverter.ToBoolean(needImgBytes, 0);
                 if (needToSendImg)
                 {
-                    lock (clasesLock)
+                    int pathLength = BitConverter.ToInt32(await networkDataHelper.ReceiveAsync(4).ConfigureAwait(false), 0);
+                    string path = Encoding.UTF8.GetString(await networkDataHelper.ReceiveAsync(pathLength).ConfigureAwait(false));
+
+                    FileInfo fileInfo = new FileInfo(path);
+
+                    string fileName = fileInfo.Name;
+                    byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
+
+                    await networkDataHelper.SendAsync(BitConverter.GetBytes(fileNameBytes.Length)).ConfigureAwait(false);
+                    await networkDataHelper.SendAsync(fileNameBytes).ConfigureAwait(false);
+                    await networkDataHelper.SendAsync(BitConverter.GetBytes(fileInfo.Length)).ConfigureAwait(false);
+
+                    long offset = 0;
+                    long partCount = Protocol.CalculateFileParts(fileInfo.Length);
+                    long currentPart = 1;
+
+                    FileStreamHelper fsh = new FileStreamHelper();
+
+                    while (offset < fileInfo.Length)
                     {
-                        int pathLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                        string path = Encoding.UTF8.GetString(networkDataHelper.Receive(pathLength));
+                        byte[] buffer;
+                        bool isLastPart = currentPart == partCount;
 
-                        FileInfo fileInfo = new FileInfo(path);
-
-                        string fileName = fileInfo.Name;
-                        byte[] fileNameBytes = Encoding.UTF8.GetBytes(fileName);
-
-                        networkDataHelper.Send(BitConverter.GetBytes(fileNameBytes.Length));
-                        networkDataHelper.Send(fileNameBytes);
-                        networkDataHelper.Send(BitConverter.GetBytes(fileInfo.Length));
-
-                        long offset = 0;
-                        long partCount = Protocol.CalculateFileParts(fileInfo.Length);
-                        long currentPart = 1;
-
-                        FileStreamHelper fsh = new FileStreamHelper();
-
-                        while (offset < fileInfo.Length)
+                        if (!isLastPart)
                         {
-                            byte[] buffer;
-                            bool isLastPart = currentPart == partCount;
-
-                            if (!isLastPart)
-                            {
-                                buffer = fsh.Read(path, offset, Protocol.MaxFileChunkSize);
-                                offset += Protocol.MaxFileChunkSize;
-                            }
-                            else
-                            {
-                                long lastPartSize = fileInfo.Length - offset;
-                                Console.WriteLine($"Sending part {currentPart}/{partCount} of size {Protocol.MaxFileChunkSize}.");
-                                buffer = fsh.Read(path, offset, (int)lastPartSize);
-                                offset += lastPartSize;
-                            }
-                            networkDataHelper.Send(buffer);
-                            currentPart++;
+                            buffer = fsh.Read(path, offset, Protocol.MaxFileChunkSize);
+                            offset += Protocol.MaxFileChunkSize;
                         }
+                        else
+                        {
+                            long lastPartSize = fileInfo.Length - offset;
+                            buffer = fsh.Read(path, offset, (int)lastPartSize);
+                            offset += lastPartSize;
+                        }
+                        await networkDataHelper.SendAsync(buffer).ConfigureAwait(false);
+                        currentPart++;
                     }
                 }
             }
@@ -373,48 +414,51 @@ namespace Server
             }
         }
 
-        static void HandleJoinClass(NetworkDataHelper networkDataHelper)
+        static async Task HandleJoinClassAsync(NetworkDataHelper networkDataHelper)
         {
             bool joined = false;
 
             try
             {
+                List<(string Name, int Occupied, int Max)> available;
                 lock (clasesLock)
                 {
-                    int classCoutner = classes.Count(c => c.CuposDisponibles > 0);
-                    networkDataHelper.Send(BitConverter.GetBytes(classCoutner));
-
-                    foreach (var c in classes.Where(c => c.CuposDisponibles > 0))
-                    {
-                        string classInfo = $"{c.Nombre}|{c.CuposMaximos - c.CuposDisponibles}|{c.CuposMaximos}";
-                        byte[] classInfoBytes = Encoding.UTF8.GetBytes(classInfo);
-                        networkDataHelper.Send(BitConverter.GetBytes(classInfoBytes.Length));
-                        networkDataHelper.Send(classInfoBytes);
-                    }
+                    available = classes.Where(c => c.CuposDisponibles > 0)
+                        .Select(c => (c.Nombre, c.CuposMaximos - c.CuposDisponibles, c.CuposMaximos)).ToList();
                 }
 
-                int namesLength = BitConverter.ToInt32(networkDataHelper.Receive(4));
-                string[] names = Encoding.UTF8.GetString(networkDataHelper.Receive(namesLength)).Split('|');
+                await networkDataHelper.SendAsync(BitConverter.GetBytes(available.Count)).ConfigureAwait(false);
+
+                foreach (var c in available)
+                {
+                    string classInfo = $"{c.Name}|{c.Occupied}|{c.Max}";
+                    byte[] classInfoBytes = Encoding.UTF8.GetBytes(classInfo);
+                    await networkDataHelper.SendAsync(BitConverter.GetBytes(classInfoBytes.Length)).ConfigureAwait(false);
+                    await networkDataHelper.SendAsync(classInfoBytes).ConfigureAwait(false);
+                }
+
+                int namesLength = BitConverter.ToInt32(await networkDataHelper.ReceiveAsync(4).ConfigureAwait(false), 0);
+                string[] names = Encoding.UTF8.GetString(await networkDataHelper.ReceiveAsync(namesLength).ConfigureAwait(false)).Split('|');
 
                 string className = names[0];
                 string userName = names[1];
 
-                Usuario userToEnroll = users.Find(u => u.nombre == userName);
-                Clase desiredClass = classes.Find(c => c.Nombre == className);
+                Usuario? userToEnroll;
+                lock (usersLock) { userToEnroll = users.FirstOrDefault(u => u.nombre == userName); }
 
+                bool didJoin = false;
                 lock (clasesLock)
                 {
-                    if (desiredClass != null &&
-                        desiredClass.CuposDisponibles > 0 &&
-                        !desiredClass.usuarios.Any(u => u.nombre == userName))
+                    var desiredClass = classes.FirstOrDefault(c => c.Nombre == className);
+                    if (desiredClass != null && desiredClass.CuposDisponibles > 0 && !desiredClass.usuarios.Any(u => u.nombre == userName))
                     {
                         desiredClass.AgregarUsuario(userToEnroll);
-                        joined = true;
+                        didJoin = true;
                         Console.WriteLine($"User {userName} joined class '{className}'.");
                     }
                 }
 
-                if (joined)
+                if (didJoin)
                 {
                     lock (cancelLock)
                     {
@@ -426,7 +470,7 @@ namespace Server
                     }
                 }
 
-                networkDataHelper.Send(BitConverter.GetBytes(joined));
+                await networkDataHelper.SendAsync(BitConverter.GetBytes(didJoin)).ConfigureAwait(false);
             }
             catch (SocketException se)
             {
@@ -438,25 +482,25 @@ namespace Server
             }
         }
 
-        static bool HandleLeaveClass(NetworkDataHelper ndh, byte[] _)
+        static async Task<bool> HandleLeaveClassAsync(NetworkDataHelper ndh, byte[] _)
         {
-            showClasesOfTheClient(ndh);
+            await showClasesOfTheClientAsync(ndh).ConfigureAwait(false);
 
-            int len = BitConverter.ToInt32(ndh.Receive(sizeof(int)));
-            string data = Encoding.UTF8.GetString(ndh.Receive(len));
+            int len = BitConverter.ToInt32(await ndh.ReceiveAsync(sizeof(int)).ConfigureAwait(false), 0);
+            string data = Encoding.UTF8.GetString(await ndh.ReceiveAsync(len).ConfigureAwait(false));
             string[] parts = data.Split('|');
-            if (parts.Length != 2) { ndh.Send(BitConverter.GetBytes(false)); return false; }
+            if (parts.Length != 2) { await ndh.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
             string userName = parts[0];
             string className = parts[1];
 
             Usuario? user;
             lock (usersLock) { user = users.FirstOrDefault(u => u.nombre == userName); }
-            if (user == null) { ndh.Send(BitConverter.GetBytes(false)); return false; }
+            if (user == null) { await ndh.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
             Clase? clase;
             lock (clasesLock) { clase = classes.FirstOrDefault(c => c.Nombre == className); }
-            if (clase == null) { ndh.Send(BitConverter.GetBytes(false)); return false; }
+            if (clase == null) { await ndh.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
             try
             {
@@ -473,7 +517,7 @@ namespace Server
 
                 if (!removed)
                 {
-                    ndh.Send(BitConverter.GetBytes(false));
+                    await ndh.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false);
                     return false;
                 }
 
@@ -487,54 +531,58 @@ namespace Server
                     set.Add(className);
                 }
 
-                ndh.Send(BitConverter.GetBytes(true));
+                await ndh.SendAsync(BitConverter.GetBytes(true)).ConfigureAwait(false);
                 Console.WriteLine($"User {userName} left class '{className}'.");
                 return true;
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error leaving class: {e.Message}");
-                ndh.Send(BitConverter.GetBytes(false));
+                await ndh.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false);
                 return false;
             }
         }
 
-        static void showClasesOfTheClient(NetworkDataHelper networkDataHelper)
+        static async Task showClasesOfTheClientAsync(NetworkDataHelper networkDataHelper)
         {
-            int userNameLength = BitConverter.ToInt32(networkDataHelper.Receive(sizeof(int)));
-            string userName = Encoding.UTF8.GetString(networkDataHelper.Receive(userNameLength));
+            int userNameLength = BitConverter.ToInt32(await networkDataHelper.ReceiveAsync(sizeof(int)).ConfigureAwait(false), 0);
+            string userName = Encoding.UTF8.GetString(await networkDataHelper.ReceiveAsync(userNameLength).ConfigureAwait(false));
 
             Usuario? usuarioLogeado = null;
             lock (usersLock) { usuarioLogeado = users.FirstOrDefault(u => u.nombre.Equals(userName)); }
 
             if (usuarioLogeado == null)
             {
-                networkDataHelper.Send(BitConverter.GetBytes(0));
+                await networkDataHelper.SendAsync(BitConverter.GetBytes(0)).ConfigureAwait(false);
                 return;
             }
 
-            List<Clase> clasesUsuario;
-            lock (clasesLock) { clasesUsuario = classes.Where(c => c.usuarios.Contains(usuarioLogeado)).ToList(); }
+            List<string> claseInfos;
+            lock (clasesLock)
+            {
+                claseInfos = classes.Where(c => c.usuarios.Contains(usuarioLogeado))
+                    .Select(c => $"{c.Nombre}|{c.Descripcion}|{c.CuposMaximos - c.CuposDisponibles}/{c.CuposMaximos}|{c.Fecha:yyyy-MM-dd}|{c.Hora}|{c.Duracion}|{c.UrlFoto}|{c.owner.nombre}")
+                    .ToList();
+            }
 
-            networkDataHelper.Send(BitConverter.GetBytes(clasesUsuario.Count));
+            await networkDataHelper.SendAsync(BitConverter.GetBytes(claseInfos.Count)).ConfigureAwait(false);
             try
             {
-                foreach (var clase in clasesUsuario)
+                foreach (var claseInfo in claseInfos)
                 {
-                    string claseInfo = $"{clase.Nombre}|{clase.Descripcion}|{clase.CuposMaximos - clase.CuposDisponibles}/{clase.CuposMaximos}|{clase.Fecha:yyyy-MM-dd}|{clase.Hora}|{clase.Duracion}|{clase.UrlFoto}|{clase.owner.nombre}";
                     byte[] claseInfoBytes = Encoding.UTF8.GetBytes(claseInfo);
-                    networkDataHelper.Send(BitConverter.GetBytes(claseInfoBytes.Length));
-                    networkDataHelper.Send(claseInfoBytes);
+                    await networkDataHelper.SendAsync(BitConverter.GetBytes(claseInfoBytes.Length)).ConfigureAwait(false);
+                    await networkDataHelper.SendAsync(claseInfoBytes).ConfigureAwait(false);
                 }
             }
             catch (Exception e) { Console.WriteLine($"Error sending class list: {e.Message}"); }
         }
 
-        static bool HandleCreateClass(NetworkDataHelper dataHelper, byte[] commandData)
+        static async Task<bool> HandleCreateClassAsync(NetworkDataHelper dataHelper, byte[] commandData)
         {
             string dataString = Encoding.UTF8.GetString(commandData);
             string[] p = dataString.Split('|');
-            if (p.Length < 8) { dataHelper.Send(BitConverter.GetBytes(false)); return false; }
+            if (p.Length < 8) { await dataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
             string name = p[0];
             string desc = p[1];
@@ -546,80 +594,86 @@ namespace Server
             string user = p[7];
             string imgUrl = "";
 
-            if (!okQuota || !okDur) { dataHelper.Send(BitConverter.GetBytes(false)); return false; }
+            if (!okQuota || !okDur) { await dataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
             Usuario owner;
             lock (usersLock) { owner = users.FirstOrDefault(u => u.nombre == user); }
-            if (owner == null) { dataHelper.Send(BitConverter.GetBytes(false)); return false; }
+            if (owner == null) { await dataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
             string fileName = "";
             bool created = false;
 
+            bool exists;
             lock (clasesLock)
             {
-                bool exists = classes.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
-                if (!exists)
+                exists = classes.Any(c => string.Equals(c.Nombre, name, StringComparison.Ordinal));
+            }
+
+            if (exists)
+            {
+                await dataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false);
+                return false;
+            }
+
+            if (hasImg == "y")
+            {
+                try
                 {
-                    if (hasImg == "y")
+                    int fileNameLength = BitConverter.ToInt32(await dataHelper.ReceiveAsync(Protocol.FileNameLenghtSize).ConfigureAwait(false), 0);
+                    string fileNameStr = Encoding.UTF8.GetString(await dataHelper.ReceiveAsync(fileNameLength).ConfigureAwait(false));
+                    fileName = fileNameStr;
+
+                    long fileSize = BitConverter.ToInt64(await dataHelper.ReceiveAsync(Protocol.FileSizeLenghtSize).ConfigureAwait(false), 0);
+
+                    long offset = 0;
+                    long partCount = Protocol.CalculateFileParts(fileSize);
+                    long currentPart = 1;
+
+                    FileStreamHelper fileStreamHelper = new FileStreamHelper();
+
+                    while (offset < fileSize)
                     {
-                        try
+                        byte[] buffer;
+                        bool isLastPart = currentPart == partCount;
+
+                        if (!isLastPart)
                         {
-                            int fileNameLength = BitConverter.ToInt32(dataHelper.Receive(Protocol.FileNameLenghtSize));
-                            string fileNameStr = Encoding.UTF8.GetString(dataHelper.Receive(fileNameLength));
-                            fileName = fileNameStr;
-
-                            long fileSize = BitConverter.ToInt64(dataHelper.Receive(Protocol.FileSizeLenghtSize));
-
-                            long offset = 0;
-                            long partCount = Protocol.CalculateFileParts(fileSize);
-                            long currentPart = 1;
-
-                            FileStreamHelper fileStreamHelper = new FileStreamHelper();
-
-                            while (offset < fileSize)
-                            {
-                                byte[] buffer;
-                                bool isLastPart = currentPart == partCount;
-
-                                if (!isLastPart)
-                                {
-                                    buffer = dataHelper.Receive(Protocol.MaxFileChunkSize);
-                                    offset += Protocol.MaxFileChunkSize;
-                                }
-                                else
-                                {
-                                    long lastPartSize = fileSize - offset;
-                                    buffer = dataHelper.Receive((int)lastPartSize);
-                                    offset += lastPartSize;
-                                }
-                                Directory.CreateDirectory("Images");
-                                fileStreamHelper.Write("Images/" + fileName, buffer);
-                                currentPart++;
-                            }
-
-                            imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName;
+                            buffer = await dataHelper.ReceiveAsync(Protocol.MaxFileChunkSize).ConfigureAwait(false);
+                            offset += Protocol.MaxFileChunkSize;
                         }
-                        catch (Exception)
+                        else
                         {
-                            string imgPath = Directory.GetCurrentDirectory() + $"/Images/" + fileName;
-                            if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
-                            {
-                                try { File.Delete(imgPath); } catch { }
-                            }
+                            long lastPartSize = fileSize - offset;
+                            buffer = await dataHelper.ReceiveAsync((int)lastPartSize).ConfigureAwait(false);
+                            offset += lastPartSize;
                         }
+                        Directory.CreateDirectory("Images");
+                        fileStreamHelper.Write("Images/" + fileName, buffer);
+                        currentPart++;
                     }
-                    var newClass = new Clase(name, desc, dur, quota, owner, startDate, startTime);
-                    if (imgUrl != "") newClass.UrlFoto = imgUrl;
-                    classes.Add(newClass);
-                    created = true;
+
+                    imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName;
+                }
+                catch (Exception)
+                {
+                    string imgPath = Directory.GetCurrentDirectory() + $"/Images/" + fileName;
+                    if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+                    {
+                        try { File.Delete(imgPath); } catch { }
+                    }
                 }
             }
 
-            dataHelper.Send(BitConverter.GetBytes(created));
+            var newClass = new Clase(name, desc, dur, quota, owner, startDate, startTime);
+            if (imgUrl != "") newClass.UrlFoto = imgUrl;
+            lock (clasesLock) { classes.Add(newClass); }
+            created = true;
+
+            await dataHelper.SendAsync(BitConverter.GetBytes(created)).ConfigureAwait(false);
             return created;
         }
 
-        static bool HandleEditClass(NetworkDataHelper networkDataHelper, byte[] commandData)
+        static async Task<bool> HandleEditClassAsync(NetworkDataHelper networkDataHelper, byte[] commandData)
         {
             try
             {
@@ -633,18 +687,18 @@ namespace Server
 
                     Usuario? validateUser;
                     lock (usersLock) { validateUser = users.FirstOrDefault(u => u.nombre == validateUserName); }
-                    if (validateUser == null) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                    if (validateUser == null) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
                     Clase? validateClassToEdit;
                     lock (clasesLock) { validateClassToEdit = classes.FirstOrDefault(c => c.Nombre == validateClassName); }
-                    if (validateClassToEdit == null) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                    if (validateClassToEdit == null) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
                     bool canEdit = validateClassToEdit.owner.nombre == validateUserName;
-                    networkDataHelper.Send(BitConverter.GetBytes(canEdit));
+                    await networkDataHelper.SendAsync(BitConverter.GetBytes(canEdit)).ConfigureAwait(false);
                     return canEdit;
                 }
 
-                if (parts.Length < 8) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                if (parts.Length < 8) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
                 string className = parts[0];
                 string newName = parts[1];
@@ -656,52 +710,59 @@ namespace Server
                 string userName = parts[7];
 
                 if (!int.TryParse(newQuotaStr, out int newQuota) || !int.TryParse(newDurationStr, out int newDuration))
-                { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
                 Usuario? user;
                 lock (usersLock) { user = users.FirstOrDefault(u => u.nombre == userName); }
-                if (user == null) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                if (user == null) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
                 Clase? classToEdit;
                 lock (clasesLock) { classToEdit = classes.FirstOrDefault(c => c.Nombre == className); }
-                if (classToEdit == null) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                if (classToEdit == null) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
-                if (classToEdit.owner.nombre != userName) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                if (classToEdit.owner.nombre != userName) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
                 if (newName != className)
                 {
+                    bool nameExists;
                     lock (clasesLock)
                     {
-                        bool nameExists = classes.Any(c => c.Nombre == newName && c != classToEdit);
-                        if (nameExists) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                        nameExists = classes.Any(c => c.Nombre == newName && c != classToEdit);
                     }
+                    if (nameExists) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
                 }
 
-                if (newQuota < classToEdit.usuarios.Count) { networkDataHelper.Send(BitConverter.GetBytes(false)); return false; }
+                if (newQuota < classToEdit.usuarios.Count) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
+
+                if (!DateTime.TryParseExact(newDate, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime parsedDate))
+                {
+                    await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false);
+                    return false;
+                }
 
                 lock (clasesLock)
                 {
                     classToEdit.Nombre = newName;
                     classToEdit.Descripcion = newDescription;
                     classToEdit.CuposMaximos = newQuota;
-                    classToEdit.Fecha = DateTime.Parse(newDate);
+                    classToEdit.Fecha = parsedDate;
                     classToEdit.Hora = newTime;
                     classToEdit.Duracion = newDuration;
                     classToEdit.Link = $"www.classlink.com/{newName.Replace(" ", "_").ToLower()}";
                 }
 
-                networkDataHelper.Send(BitConverter.GetBytes(true));
+                await networkDataHelper.SendAsync(BitConverter.GetBytes(true)).ConfigureAwait(false);
                 return true;
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error editing class: {e.Message}");
-                networkDataHelper.Send(BitConverter.GetBytes(false));
+                await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false);
                 return false;
             }
         }
 
-        static void HandleHistory(NetworkDataHelper ndh, byte[] cmdData)
+        static async Task HandleHistoryAsync(NetworkDataHelper ndh, byte[] cmdData)
         {
             try
             {
@@ -710,7 +771,7 @@ namespace Server
                 lock (usersLock) { user = users.FirstOrDefault(u => u.nombre == userName); }
                 if (user == null)
                 {
-                    ndh.Send(BitConverter.GetBytes(0));
+                    await ndh.SendAsync(BitConverter.GetBytes(0)).ConfigureAwait(false);
                     return;
                 }
 
@@ -742,18 +803,18 @@ namespace Server
                     }
                 }
 
-                ndh.Send(BitConverter.GetBytes(results.Count));
+                await ndh.SendAsync(BitConverter.GetBytes(results.Count)).ConfigureAwait(false);
                 foreach (var line in results.Values)
                 {
                     var bytes = Encoding.UTF8.GetBytes(line);
-                    ndh.Send(BitConverter.GetBytes(bytes.Length));
-                    ndh.Send(bytes);
+                    await ndh.SendAsync(BitConverter.GetBytes(bytes.Length)).ConfigureAwait(false);
+                    await ndh.SendAsync(bytes).ConfigureAwait(false);
                 }
             }
             catch (Exception e)
             {
                 Console.WriteLine($"Error sending history: {e.Message}");
-                ndh.Send(BitConverter.GetBytes(0));
+                await ndh.SendAsync(BitConverter.GetBytes(0)).ConfigureAwait(false);
             }
         }
 

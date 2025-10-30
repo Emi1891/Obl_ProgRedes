@@ -1,17 +1,20 @@
 using System;
 using System.IO;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 
 namespace Common
 {
     public class NetworkDataHelper
     {
         public readonly Socket _socket;
+        private readonly NetworkStream _stream;
 
         public NetworkDataHelper(Socket socket)
         {
             _socket = socket ?? throw new ArgumentNullException(nameof(socket));
             _socket.Blocking = true;
+            _stream = new NetworkStream(_socket, false);
         }
         public byte[] Receive(int length)
         {
@@ -68,6 +71,48 @@ namespace Common
 
                 offset += bytesSent;
             }
+        }
+
+        public async Task<byte[]> ReceiveAsync(int length)
+        {
+            if (length < 0) throw new ArgumentOutOfRangeException(nameof(length));
+            var buffer = new byte[length];
+            int offset = 0;
+
+            while (offset < length)
+            {
+                EnsureConnectedOrThrow();
+
+                int bytesRead;
+                try
+                {
+                    bytesRead = await _stream.ReadAsync(buffer, offset, length - offset).ConfigureAwait(false);
+                }
+                catch (SocketException) { throw; }
+                catch (ObjectDisposedException) { throw; }
+                catch (IOException) { throw; }
+
+                if (bytesRead == 0)
+                {
+                    throw new SocketException((int)SocketError.ConnectionReset);
+                }
+
+                offset += bytesRead;
+            }
+            return buffer;
+        }
+
+        public async Task SendAsync(byte[] buffer)
+        {
+            if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+            try
+            {
+                await _stream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                await _stream.FlushAsync().ConfigureAwait(false);
+            }
+            catch (SocketException) { throw; }
+            catch (ObjectDisposedException) { throw; }
+            catch (IOException) { throw; }
         }
 
         public byte[] ReceiveWithTimeout(int length, int msTimeout)
