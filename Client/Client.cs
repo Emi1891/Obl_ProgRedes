@@ -253,11 +253,62 @@ namespace Client
             Console.Write("Enter new duration (minutes): ");
             if (!int.TryParse(Console.ReadLine(), out int newDuration) || newDuration <= 0) { Console.WriteLine("\nInvalid duration."); return true; }
 
-            string hasNewImage = "n";
+            bool validOption = false;
+            string input = "n";
+
+            while (!validOption) {
+                Console.Write("Would you like to change the cover image? (y/n): ");
+                try
+                {
+                    input = Console.ReadLine().ToLower();
+
+                    if (input != "y" && input != "n")
+                    {
+                        Console.WriteLine("\nInvalid input. Please enter 'y' or 'n'. NO SALTO AL CATCH");
+                    }
+                    else
+                    {
+                        validOption = true;
+                    }
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("\nInvalid input. Please enter 'y' or 'n'. SALTO AL CATCH");
+                }
+            }
+
+            string hasNewImage = input;
             string cmdData = $"{className}|{newName}|{newDescription}|{newQuota}|{newDate}|{newTime}|{newDuration}|{userLogged}|{hasNewImage}";
             byte[] bytes = Encoding.UTF8.GetBytes(cmdData);
             await ndh.SendAsync(BitConverter.GetBytes(bytes.Length)).ConfigureAwait(false);
             await ndh.SendAsync(bytes).ConfigureAwait(false);
+
+            if (hasNewImage == "y")
+            {
+                Console.Write("Type the image path: ");
+                string? filePath = Console.ReadLine();
+                FileInfo fi = new FileInfo(filePath);
+                string fileName = fi.Name;
+                byte[] fn = Encoding.UTF8.GetBytes(fileName);
+                await ndh.SendAsync(BitConverter.GetBytes(fn.Length)).ConfigureAwait(false);
+                await ndh.SendAsync(fn).ConfigureAwait(false);
+                await ndh.SendAsync(BitConverter.GetBytes(fi.Length)).ConfigureAwait(false);
+
+                long offset = 0;
+                long partCount = Protocol.CalculateFileParts(fi.Length);
+                long currentPart = 1;
+                FileStreamHelper fsh = new FileStreamHelper();
+
+                while (offset < fi.Length)
+                {
+                    byte[] buffer;
+                    bool last = currentPart == partCount;
+                    if (!last) { buffer = fsh.Read(filePath, offset, Protocol.MaxFileChunkSize); offset += Protocol.MaxFileChunkSize; }
+                    else { long lastSize = fi.Length - offset; buffer = fsh.Read(filePath, offset, (int)lastSize); offset += lastSize; }
+                    await ndh.SendAsync(buffer).ConfigureAwait(false);
+                    currentPart++;
+                }
+            }
 
             bool ok = BitConverter.ToBoolean(await ndh.ReceiveAsync(1).ConfigureAwait(false), 0);
             Console.WriteLine(ok ? "\nClass edited successfully." : "\nCould not edit class. You might not be the owner or the class doesn't exist.");

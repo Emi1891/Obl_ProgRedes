@@ -647,16 +647,16 @@ namespace Server
                             buffer = await dataHelper.ReceiveAsync((int)lastPartSize).ConfigureAwait(false);
                             offset += lastPartSize;
                         }
-                        Directory.CreateDirectory("Images");
-                        fileStreamHelper.Write("Images/" + fileName, buffer);
+                        Directory.CreateDirectory($"Images/{name}");
+                        fileStreamHelper.Write($"Images/{name}/" + fileName, buffer);
                         currentPart++;
                     }
 
-                    imgUrl = Directory.GetCurrentDirectory() + "/Images/" + fileName;
+                    imgUrl = Directory.GetCurrentDirectory() + $"/Images/{name}/" + fileName;
                 }
                 catch (Exception)
                 {
-                    string imgPath = Directory.GetCurrentDirectory() + $"/Images/" + fileName;
+                    string imgPath = Directory.GetCurrentDirectory() + $"/Images/{name}/" + fileName;
                     if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
                     {
                         try { File.Delete(imgPath); } catch { }
@@ -708,6 +708,7 @@ namespace Server
                 string newTime = parts[5];
                 string newDurationStr = parts[6];
                 string userName = parts[7];
+                string hasImg = parts[8];
 
                 if (!int.TryParse(newQuotaStr, out int newQuota) || !int.TryParse(newDurationStr, out int newDuration))
                 { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
@@ -722,6 +723,9 @@ namespace Server
 
                 if (classToEdit.owner.nombre != userName) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
 
+                string finalClassName = className;
+                bool deleteOldFolder = false;
+
                 if (newName != className)
                 {
                     bool nameExists;
@@ -730,6 +734,8 @@ namespace Server
                         nameExists = classes.Any(c => c.Nombre == newName && c != classToEdit);
                     }
                     if (nameExists) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
+                    finalClassName = newName;
+                    deleteOldFolder = true;
                 }
 
                 if (newQuota < classToEdit.usuarios.Count) { await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false); return false; }
@@ -738,6 +744,85 @@ namespace Server
                 {
                     await networkDataHelper.SendAsync(BitConverter.GetBytes(false)).ConfigureAwait(false);
                     return false;
+                }
+
+                if (hasImg == "y")
+                {
+                    string fileName = "";
+                    string imgUrl = "";
+                    bool oldHasImg = classToEdit.UrlFoto != "No image uploaded";
+                    string oldFileName = "";
+                    string auxPath = "";
+                    string newImgUrl = "";
+
+                    if (oldHasImg)
+                    {
+                        oldFileName = Path.GetFileName(classToEdit.UrlFoto);
+                        Directory.CreateDirectory("AuxiliarDirectory");
+                        auxPath = Directory.GetCurrentDirectory() + "/AuxiliarDirectory";
+                        File.Move(classToEdit.UrlFoto, auxPath + $"/{oldFileName}");
+                    }
+
+                    try
+                    {
+                        int fileNameLength = BitConverter.ToInt32(await networkDataHelper.ReceiveAsync(Protocol.FileNameLenghtSize).ConfigureAwait(false), 0);
+                        string fileNameStr = Encoding.UTF8.GetString(await networkDataHelper.ReceiveAsync(fileNameLength).ConfigureAwait(false));
+                        fileName = fileNameStr;
+
+                        long fileSize = BitConverter.ToInt64(await networkDataHelper.ReceiveAsync(Protocol.FileSizeLenghtSize).ConfigureAwait(false), 0);
+
+                        long offset = 0;
+                        long partCount = Protocol.CalculateFileParts(fileSize);
+                        long currentPart = 1;
+
+                        FileStreamHelper fileStreamHelper = new FileStreamHelper();
+
+                        while (offset < fileSize)
+                        {
+                            byte[] buffer;
+                            bool isLastPart = currentPart == partCount;
+
+                            if (!isLastPart)
+                            {
+                                buffer = await networkDataHelper.ReceiveAsync(Protocol.MaxFileChunkSize).ConfigureAwait(false);
+                                offset += Protocol.MaxFileChunkSize;
+                            }
+                            else
+                            {
+                                long lastPartSize = fileSize - offset;
+                                buffer = await networkDataHelper.ReceiveAsync((int)lastPartSize).ConfigureAwait(false);
+                                offset += lastPartSize;
+                            }
+                            Directory.CreateDirectory($"Images/{finalClassName}");
+                            fileStreamHelper.Write($"Images/{finalClassName}/" + fileName, buffer);
+                            currentPart++;
+                        }
+
+                        imgUrl = Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/" + fileName;
+
+                        if (deleteOldFolder)
+                        {
+                            Directory.Delete($"Images/{className}");
+                            File.Delete(auxPath + $"/{oldFileName}");
+                            Directory.Delete("AuxiliarDirectory");
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        string imgPath = Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/" + fileName;
+                        if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
+                        {
+                            try 
+                            {
+                                if (auxPath != "") {
+                                    Directory.CreateDirectory($"Images/{finalClassName}");
+                                    File.Move(auxPath + $"/{oldFileName}", $"/Images/{finalClassName}/{oldFileName}");
+                                }
+                                File.Delete(imgPath);
+                            } 
+                            catch { }
+                        }
+                    }
                 }
 
                 lock (clasesLock)
