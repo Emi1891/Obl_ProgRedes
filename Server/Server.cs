@@ -746,6 +746,8 @@ namespace Server
                     return false;
                 }
 
+                string newImgUrl = "No image uploaded";
+
                 if (hasImg == "y")
                 {
                     string fileName = "";
@@ -753,7 +755,6 @@ namespace Server
                     bool oldHasImg = classToEdit.UrlFoto != "No image uploaded";
                     string oldFileName = "";
                     string auxPath = "";
-                    string newImgUrl = "";
 
                     if (oldHasImg)
                     {
@@ -799,8 +800,9 @@ namespace Server
                         }
 
                         imgUrl = Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/" + fileName;
+                        newImgUrl = imgUrl;
 
-                        if (deleteOldFolder)
+                        if (deleteOldFolder && oldHasImg)
                         {
                             Directory.Delete($"Images/{className}");
                             File.Delete(auxPath + $"/{oldFileName}");
@@ -834,6 +836,7 @@ namespace Server
                     classToEdit.Hora = newTime;
                     classToEdit.Duracion = newDuration;
                     classToEdit.Link = $"www.classlink.com/{newName.Replace(" ", "_").ToLower()}";
+                    classToEdit.UrlFoto = newImgUrl;
                 }
 
                 await networkDataHelper.SendAsync(BitConverter.GetBytes(true)).ConfigureAwait(false);
