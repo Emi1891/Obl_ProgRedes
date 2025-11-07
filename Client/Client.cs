@@ -49,8 +49,17 @@ namespace Client
             clientSocket.SendTimeout = 10000;
             clientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 
-            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
+            string serverHostString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "host.docker.internal";
+            
+            IPAddress[] addresses = await Dns.GetHostAddressesAsync(serverHostString);
+            if (addresses.Length == 0)
+            {
+                throw new Exception($"Could not resolve server hostname: {serverHostString}");
+            }
+            
+            IPAddress serverIp = addresses[0];
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.ServerPortConfigKey) ?? "5000";
+            int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
             bool connected = false;

@@ -53,8 +53,11 @@ namespace Server
             Console.WriteLine("Type 'r' or 'report' and press Enter to print the classes report.\n");
             Console.WriteLine("Type 'c' or 'cancel' and press Enter to cancel a running report.\n");
 
-            IPAddress serverIp = IPAddress.Parse(settingsMgr.ReadSetting(ServerConfig.ServerIpConfigKey));
-            int serverPort = int.Parse(settingsMgr.ReadSetting(ServerConfig.ServerPortConfigKey));
+            string serverIpString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.ServerPortConfigKey) ?? "5000";
+
+            IPAddress serverIp = IPAddress.Parse(serverIpString);
+            int serverPort = int.Parse(serverPortString);
             var serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
             var listener = new TcpListener(serverEndPoint);

@@ -1,0 +1,8 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+
+WORKDIR /app
+
+COPY Server ./Server
+COPY Common ./Common
+
+ENTRYPOINT dotnet run --project ./Server/Server.csproj --configuration Release
