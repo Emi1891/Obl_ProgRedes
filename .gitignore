@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 
 #Extra
 obj/
+bin/
+ServerFiles/
+ClientFiles/

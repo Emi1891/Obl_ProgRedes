@@ -41,7 +41,7 @@ namespace Server
             users.Add(new Usuario("1", "1"));
 
             var usuarioBase = users.First(u => u.nombre == "1");
-            string today = DateTime.Now.ToString("yyyy-MM-dd");
+            string today = DateTime.Now.ToString("dd/MM/yyyy");
             classes.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
             classes.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
             classes.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
@@ -53,12 +53,18 @@ namespace Server
             Console.WriteLine("Type 'r' or 'report' and press Enter to print the classes report.\n");
             Console.WriteLine("Type 'c' or 'cancel' and press Enter to cancel a running report.\n");
 
-            string serverIpString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
-            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.ServerPortConfigKey) ?? "5000";
+            string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
+            IPAddress[] addresses = await Dns.GetHostAddressesAsync(serverHostnameString);
+            IPAddress? serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork); // Busco la primer IP que sea IPv4
+            if (serverIp == null)
+            {
+                throw new Exception($"Could not resolve server hostname: {serverHostnameString}");
+            }
 
-            IPAddress serverIp = IPAddress.Parse(serverIpString);
+            string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.ServerPortConfigKey) ?? "5000";
             int serverPort = int.Parse(serverPortString);
-            var serverEndPoint = new IPEndPoint(serverIp, serverPort);
+
+            IPEndPoint serverEndPoint = new IPEndPoint(serverIp, serverPort);
 
             var listener = new TcpListener(serverEndPoint);
             listener.Start();
@@ -788,6 +794,7 @@ namespace Server
                 }
                 catch (Exception)
                 {
+                    imgUrl = "";
                     string imgPath = Directory.GetCurrentDirectory() + $"/Images/{name}/" + fileName;
                     if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
                     {
@@ -796,10 +803,17 @@ namespace Server
                 }
             }
 
-            var newClass = new Clase(name, desc, dur, quota, owner, startDate, startTime);
-            if (imgUrl != "") newClass.UrlFoto = imgUrl;
-            lock (clasesLock) { classes.Add(newClass); }
-            created = true;
+            try
+            {
+                var newClass = new Clase(name, desc, dur, quota, owner, startDate, startTime);
+                if (imgUrl != "") newClass.UrlFoto = imgUrl;
+                lock (clasesLock) { classes.Add(newClass); }
+                created = true;
+            }
+            catch (Exception)
+            {
+                created = false;
+            }
 
             await dataHelper.SendAsync(BitConverter.GetBytes(created)).ConfigureAwait(false);
             return created;
@@ -943,17 +957,28 @@ namespace Server
                     }
                     catch (Exception)
                     {
+                        newImgUrl = "No image uploaded";
                         string imgPath = Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/" + fileName;
                         if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
                         {
                             try 
                             {
-                                if (auxPath != "") {
+                                if (auxPath != "" && oldHasImg) {
                                     Directory.CreateDirectory($"Images/{finalClassName}");
-                                    File.Move(auxPath + $"/{oldFileName}", $"/Images/{finalClassName}/{oldFileName}");
+                                    File.Move(auxPath + $"/{oldFileName}", Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/{oldFileName}");
                                 }
                                 File.Delete(imgPath);
                             } 
+                            catch { }
+                        }
+                        else if (oldHasImg && auxPath != "")
+                        {
+                            try
+                            {
+                                Directory.CreateDirectory($"Images/{finalClassName}");
+                                File.Move(auxPath + $"/{oldFileName}", Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/{oldFileName}");
+                                Directory.Delete("AuxiliarDirectory");
+                            }
                             catch { }
                         }
                     }

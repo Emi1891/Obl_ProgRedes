@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 
 namespace Dominio
 {
@@ -28,7 +29,7 @@ namespace Dominio
             Duracion = _duracion;
             CuposMaximos = _cupos;
             owner = _usuario;
-            Fecha = DateTime.Parse(_fechaInicio);
+            Fecha = DateTime.ParseExact(_fechaInicio, "dd/MM/yyyy", CultureInfo.InvariantCulture);
             Hora = _horaInicio;
             Link = $"www.classlink.com/{Nombre.Replace(" ", "_").ToLower()}";
         }

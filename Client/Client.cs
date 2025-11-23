@@ -48,16 +48,32 @@ namespace Client
             clientSocket.ReceiveTimeout = 10000;
             clientSocket.SendTimeout = 10000;
             clientSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-
-            string serverHostString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "host.docker.internal";
             
-            IPAddress[] addresses = await Dns.GetHostAddressesAsync(serverHostString);
-            if (addresses.Length == 0)
+            // Obtengo el IP del cliente
+            string clientHostnameString = Environment.GetEnvironmentVariable(ClientConfig.ClientIpConfigKey) ?? "127.0.0.1";
+            IPAddress[] adresses = Dns.GetHostAddresses(clientHostnameString);
+            IPAddress? clientIp = adresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork); // Busco la primer IP que sea IPv4
+            if (clientIp == null)
             {
-                throw new Exception($"Could not resolve server hostname: {serverHostString}");
+                throw new Exception($"Could not resolve client hostname: {clientHostnameString}");
             }
-            
-            IPAddress serverIp = addresses[0];
+
+            // Obtengo el puerto del cliente
+            string clientPortString = Environment.GetEnvironmentVariable(ClientConfig.ClientPortConfigKey) ?? "0";
+            int clientPort = int.Parse(clientPortString);
+            IPEndPoint clientEndPoint = new IPEndPoint(clientIp, clientPort);
+            clientSocket.Bind(clientEndPoint);
+
+            // Obtengo el IP del servidor
+            string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "127.0.0.1";
+            IPAddress[] serverAddresses = await Dns.GetHostAddressesAsync(serverHostnameString);
+            IPAddress? serverIp = serverAddresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork); // Busco la primer IP que sea IPv4
+            if (serverIp == null)
+            {
+                throw new Exception($"Could not resolve server hostname: {serverHostnameString}");
+            }
+
+            // Obtengo el puerto del servidor
             string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.ServerPortConfigKey) ?? "5000";
             int serverPort = int.Parse(serverPortString);
             IPEndPoint serverEndPoint = new IPEndPoint(serverIp, serverPort);
@@ -294,28 +310,43 @@ namespace Client
 
             if (hasNewImage == "y")
             {
-                Console.Write("Type the image path: ");
-                string? filePath = Console.ReadLine();
-                FileInfo fi = new FileInfo(filePath);
-                string fileName = fi.Name;
-                byte[] fn = Encoding.UTF8.GetBytes(fileName);
-                await ndh.SendAsync(BitConverter.GetBytes(fn.Length)).ConfigureAwait(false);
-                await ndh.SendAsync(fn).ConfigureAwait(false);
-                await ndh.SendAsync(BitConverter.GetBytes(fi.Length)).ConfigureAwait(false);
+                bool ended = false;
+                while(!ended){
+                    try{
+                        Console.Write("Type the image path: ");
+                        string? filePath = Console.ReadLine();
+                        FileInfo fi = new FileInfo(filePath);
+                        string fileName = fi.Name;
+                        if (!fi.Exists) {
+                            throw new Exception("Could not find the file.");
+                        }
+                        
+                        byte[] fn = Encoding.UTF8.GetBytes(fileName);
+                        await ndh.SendAsync(BitConverter.GetBytes(fn.Length)).ConfigureAwait(false);
+                        await ndh.SendAsync(fn).ConfigureAwait(false);
+                        await ndh.SendAsync(BitConverter.GetBytes(fi.Length)).ConfigureAwait(false);
 
-                long offset = 0;
-                long partCount = Protocol.CalculateFileParts(fi.Length);
-                long currentPart = 1;
-                FileStreamHelper fsh = new FileStreamHelper();
+                        long offset = 0;
+                        long partCount = Protocol.CalculateFileParts(fi.Length);
+                        long currentPart = 1;
+                        FileStreamHelper fsh = new FileStreamHelper();
 
-                while (offset < fi.Length)
-                {
-                    byte[] buffer;
-                    bool last = currentPart == partCount;
-                    if (!last) { buffer = fsh.Read(filePath, offset, Protocol.MaxFileChunkSize); offset += Protocol.MaxFileChunkSize; }
-                    else { long lastSize = fi.Length - offset; buffer = fsh.Read(filePath, offset, (int)lastSize); offset += lastSize; }
-                    await ndh.SendAsync(buffer).ConfigureAwait(false);
-                    currentPart++;
+                        while (offset < fi.Length)
+                        {
+                            byte[] buffer;
+                            bool last = currentPart == partCount;
+                            if (!last) { buffer = fsh.Read(filePath, offset, Protocol.MaxFileChunkSize); offset += Protocol.MaxFileChunkSize; }
+                            else { long lastSize = fi.Length - offset; buffer = fsh.Read(filePath, offset, (int)lastSize); offset += lastSize; }
+                            await ndh.SendAsync(buffer).ConfigureAwait(false);
+                            currentPart++;
+                        }
+                        ended = true;
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"\nError uploading image: {e.Message}");
+                        Console.WriteLine("Please enter a valid image path.");
+                    }
                 }
             }
 
@@ -573,28 +604,42 @@ namespace Client
 
             if (hasImg == "y")
             {
-                Console.Write("Type the image path: ");
-                string? filePath = Console.ReadLine();
-                FileInfo fi = new FileInfo(filePath);
-                string fileName = fi.Name;
-                byte[] fn = Encoding.UTF8.GetBytes(fileName);
-                await ndh.SendAsync(BitConverter.GetBytes(fn.Length)).ConfigureAwait(false);
-                await ndh.SendAsync(fn).ConfigureAwait(false);
-                await ndh.SendAsync(BitConverter.GetBytes(fi.Length)).ConfigureAwait(false);
+                bool ended = false;
+                while(!ended){
+                    try{
+                        Console.Write("Type the image path: ");
+                        string? filePath = Console.ReadLine();
+                        FileInfo fi = new FileInfo(filePath);
+                        string fileName = fi.Name;
+                        if (!fi.Exists) {
+                            throw new Exception("Could not find the file.");
+                        }
+                        byte[] fn = Encoding.UTF8.GetBytes(fileName);
+                        await ndh.SendAsync(BitConverter.GetBytes(fn.Length)).ConfigureAwait(false);
+                        await ndh.SendAsync(fn).ConfigureAwait(false);
+                        await ndh.SendAsync(BitConverter.GetBytes(fi.Length)).ConfigureAwait(false);
 
-                long offset = 0;
-                long partCount = Protocol.CalculateFileParts(fi.Length);
-                long currentPart = 1;
-                FileStreamHelper fsh = new FileStreamHelper();
+                        long offset = 0;
+                        long partCount = Protocol.CalculateFileParts(fi.Length);
+                        long currentPart = 1;
+                        FileStreamHelper fsh = new FileStreamHelper();
 
-                while (offset < fi.Length)
-                {
-                    byte[] buffer;
-                    bool last = currentPart == partCount;
-                    if (!last) { buffer = fsh.Read(filePath, offset, Protocol.MaxFileChunkSize); offset += Protocol.MaxFileChunkSize; }
-                    else { long lastSize = fi.Length - offset; buffer = fsh.Read(filePath, offset, (int)lastSize); offset += lastSize; }
-                    await ndh.SendAsync(buffer).ConfigureAwait(false);
-                    currentPart++;
+                        while (offset < fi.Length)
+                        {
+                            byte[] buffer;
+                            bool last = currentPart == partCount;
+                            if (!last) { buffer = fsh.Read(filePath, offset, Protocol.MaxFileChunkSize); offset += Protocol.MaxFileChunkSize; }
+                            else { long lastSize = fi.Length - offset; buffer = fsh.Read(filePath, offset, (int)lastSize); offset += lastSize; }
+                            await ndh.SendAsync(buffer).ConfigureAwait(false);
+                            currentPart++;
+                        }
+                        ended = true;
+                    }
+                    catch (Exception e)
+                    {
+                        Console.WriteLine($"\nError uploading image: {e.Message}");
+                        Console.WriteLine("Please enter a valid image path.\n");
+                    }
                 }
             }
 

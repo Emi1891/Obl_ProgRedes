@@ -8,7 +8,7 @@ namespace Cliente
 {
     public static class ClientConfig
     {
-        public static string ClientIpConfigKey = "ClientIpAddress";
-        public static string ClientPortConfigKey = "ClientPort";
+        public static string ClientIpConfigKey = "CLIENT_HOSTNAME";
+        public static string ClientPortConfigKey = "CLIENT_PORT";
     }
 }
