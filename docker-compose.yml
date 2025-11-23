@@ -1,0 +1,105 @@
+version: "3.8"
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    networks:
+      - app-net
+
+  server:
+    build:
+      context: .
+      dockerfile: Server/ServerDockerfile
+    image: server-app:latest
+    ports:
+      - "5000:5000"
+      - "5002:5002"
+    environment:
+      - SERVER_IP=0.0.0.0
+      - SERVER_PORT=5000
+      - GRPC_PORT=5002
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+      - IMAGES_DIR=/images
+    volumes:
+      - ./server-images:/images
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-net
+
+  client:
+    build:
+      context: .
+      dockerfile: Client/ClientDockerfile
+    image: client-app:latest
+    environment:
+      - SERVER_IP=server
+      - SERVER_PORT=5000
+      - IMAGES_DIR=/client-images
+    volumes:
+      - ./client-images:/client-images
+    stdin_open: true
+    tty: true
+    depends_on:
+      - server
+    networks:
+      - app-net
+
+  log-server:
+    build:
+      context: .
+      dockerfile: Servidor de Logs/Dockerfile
+    image: log-server:latest
+    ports:
+      - "5001:5001"
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=guest
+      - RABBITMQ_PASSWORD=guest
+    depends_on:
+      - rabbitmq
+    networks:
+      - app-net
+
+  chat-server:
+    build:
+      context: .
+      dockerfile: Servidor de Chat/Dockerfile
+    image: chat-server:latest
+    ports:
+      - "5003:5003"
+    environment:
+      - CHAT_PORT=5003
+      - MAIN_SERVER_GRPC_URL=http://server:5002
+    depends_on:
+      - server
+    networks:
+      - app-net
+
+  chat-client:
+    build:
+      context: .
+      dockerfile: Cliente de Chat/Dockerfile
+    image: chat-client:latest
+    environment:
+      - CHAT_SERVER_URL=ws://chat-server:5003/chat
+    stdin_open: true
+    tty: true
+    depends_on:
+      - chat-server
+    networks:
+      - app-net
+
+networks:
+  app-net:
+    driver: bridge

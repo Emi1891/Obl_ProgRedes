@@ -1,0 +1,7 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+
+WORKDIR /app
+COPY Client ./Client
+COPY Common ./Common
+
+ENTRYPOINT ["dotnet", "run", "--project", "./Client/Client.csproj", "--configuration", "Release"]

@@ -553,7 +553,12 @@ namespace Client
                 if (chosen > classCounter || chosen < 1) { Console.WriteLine("\nInvalid input."); return true; }
 
                 string selected = listed.Find(c => int.Parse(c[0]) == chosen)![1];
-                string classAndUser = selected + $"|{userLogged}";
+                
+                Console.Write("Ingrese webhook URL (opcional, presione Enter para omitir): ");
+                string? webhookUrl = Console.ReadLine();
+                if (string.IsNullOrWhiteSpace(webhookUrl)) webhookUrl = "";
+                
+                string classAndUser = selected + $"|{userLogged}|{webhookUrl}";
                 byte[] b = Encoding.UTF8.GetBytes(classAndUser);
                 await ndh.SendAsync(BitConverter.GetBytes(b.Length)).ConfigureAwait(false);
                 await ndh.SendAsync(b).ConfigureAwait(false);

@@ -10,6 +10,10 @@ using Dominio;
 using System.IO;
 using System.Globalization;
 using System.Threading;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Server
 {
@@ -27,6 +31,11 @@ namespace Server
         static readonly List<Clase> classes = new List<Clase>();
         static readonly object clasesLock = new object();
 
+        public static List<Usuario> GetUsers() => users;
+        public static List<Clase> GetClasses() => classes;
+        public static object GetUsersLock() => usersLock;
+        public static object GetClassesLock() => clasesLock;
+
         static readonly Dictionary<string, HashSet<string>> cancellations = new Dictionary<string, HashSet<string>>();
         static readonly object cancelLock = new object();
 
@@ -36,8 +45,15 @@ namespace Server
 
         static volatile bool running = true;
 
+        static readonly Dictionary<string, string> classWebhooks = new Dictionary<string, string>();
+        static readonly object webhookLock = new object();
+        static readonly Dictionary<string, System.Threading.Timer> webhookTimers = new Dictionary<string, System.Threading.Timer>();
+        static readonly object timerLock = new object();
+
         static async Task Main(string[] args)
         {
+            LogHelper.Initialize();
+
             users.Add(new Usuario("1", "1"));
 
             var usuarioBase = users.First(u => u.nombre == "1");
@@ -48,17 +64,31 @@ namespace Server
             classes.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
             classes.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
 
+            // Iniciar tarea para verificar webhooks
+            _ = Task.Run(() => StartWebhookScheduler());
+
+            // Iniciar servidor gRPC en background
+            _ = Task.Run(async () => await StartGrpcServerAsync());
+
             Console.WriteLine("Starting Server Application ... ");
             Console.WriteLine("\nPress 'q' and 'Enter' at any time while not handling a client to stop the server.\n");
             Console.WriteLine("Type 'r' or 'report' and press Enter to print the classes report.\n");
             Console.WriteLine("Type 'c' or 'cancel' and press Enter to cancel a running report.\n");
 
             string serverHostnameString = Environment.GetEnvironmentVariable(ServerConfig.ServerIpConfigKey) ?? "0.0.0.0";
-            IPAddress[] addresses = await Dns.GetHostAddressesAsync(serverHostnameString);
-            IPAddress? serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork); // Busco la primer IP que sea IPv4
-            if (serverIp == null)
+            IPAddress? serverIp;
+            if (serverHostnameString == "0.0.0.0" || serverHostnameString == "::0")
             {
-                throw new Exception($"Could not resolve server hostname: {serverHostnameString}");
+                serverIp = IPAddress.Any; // Usar Any para escuchar en todas las interfaces
+            }
+            else
+            {
+                IPAddress[] addresses = await Dns.GetHostAddressesAsync(serverHostnameString);
+                serverIp = addresses.FirstOrDefault(ip => ip.AddressFamily == AddressFamily.InterNetwork);
+                if (serverIp == null)
+                {
+                    throw new Exception($"Could not resolve server hostname: {serverHostnameString}");
+                }
             }
 
             string serverPortString = Environment.GetEnvironmentVariable(ServerConfig.ServerPortConfigKey) ?? "5000";
@@ -403,6 +433,11 @@ namespace Server
                 if (!exists) { users.Add(new Usuario(username, password)); added = true; }
             }
 
+            if (added)
+            {
+                LogHelper.SendLog(username, "", "Usuario registrado", $"Nuevo usuario registrado: {username}");
+            }
+
             await networkDataHelper.SendAsync(BitConverter.GetBytes(added)).ConfigureAwait(false);
         }
 
@@ -420,7 +455,11 @@ namespace Server
             }
 
             await networkDataHelper.SendAsync(BitConverter.GetBytes(validUser)).ConfigureAwait(false);
-            if (validUser) Console.WriteLine($"User {username} logged in.");
+            if (validUser)
+            {
+                Console.WriteLine($"User {username} logged in.");
+                LogHelper.SendLog(username, "", "Usuario inició sesión", $"Usuario {username} inició sesión");
+            }
             return validUser;
         }
 
@@ -554,8 +593,6 @@ namespace Server
 
         static async Task HandleJoinClassAsync(NetworkDataHelper networkDataHelper)
         {
-            bool joined = false;
-
             try
             {
                 List<(string Name, int Occupied, int Max)> available;
@@ -580,11 +617,13 @@ namespace Server
 
                 string className = names[0];
                 string userName = names[1];
+                string? webhookUrl = names.Length > 2 && !string.IsNullOrWhiteSpace(names[2]) ? names[2] : null;
 
                 Usuario? userToEnroll;
                 lock (usersLock) { userToEnroll = users.FirstOrDefault(u => u.nombre == userName); }
 
                 bool didJoin = false;
+                Clase? joinedClass = null;
                 lock (clasesLock)
                 {
                     var desiredClass = classes.FirstOrDefault(c => c.Nombre == className);
@@ -592,12 +631,26 @@ namespace Server
                     {
                         desiredClass.AgregarUsuario(userToEnroll);
                         didJoin = true;
+                        joinedClass = desiredClass;
                         Console.WriteLine($"User {userName} joined class '{className}'.");
                     }
                 }
 
-                if (didJoin)
+                if (didJoin && joinedClass != null)
                 {
+                    LogHelper.SendLog(userName, className, "Usuario se inscribió a clase", $"Usuario {userName} se inscribió a la clase {className}");
+
+                    // Guardar webhook si se proporcionó
+                    if (!string.IsNullOrWhiteSpace(webhookUrl))
+                    {
+                        string webhookKey = $"{userName}|{className}";
+                        lock (webhookLock)
+                        {
+                            classWebhooks[webhookKey] = webhookUrl;
+                        }
+                        ScheduleWebhook(joinedClass, webhookUrl, userName);
+                    }
+
                     lock (cancelLock)
                     {
                         if (cancellations.ContainsKey(userName))
@@ -671,6 +724,7 @@ namespace Server
 
                 await ndh.SendAsync(BitConverter.GetBytes(true)).ConfigureAwait(false);
                 Console.WriteLine($"User {userName} left class '{className}'.");
+                LogHelper.SendLog(userName, className, "Usuario abandonó clase", $"Usuario {userName} abandonó la clase {className}");
                 return true;
             }
             catch (Exception e)
@@ -809,6 +863,10 @@ namespace Server
                 if (imgUrl != "") newClass.UrlFoto = imgUrl;
                 lock (clasesLock) { classes.Add(newClass); }
                 created = true;
+                if (created)
+                {
+                    LogHelper.SendLog(user, name, "Clase creada", $"Usuario {user} creó la clase {name}");
+                }
             }
             catch (Exception)
             {
@@ -961,14 +1019,15 @@ namespace Server
                         string imgPath = Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/" + fileName;
                         if (!string.IsNullOrEmpty(fileName) && File.Exists(imgPath))
                         {
-                            try 
+                            try
                             {
-                                if (auxPath != "" && oldHasImg) {
+                                if (auxPath != "" && oldHasImg)
+                                {
                                     Directory.CreateDirectory($"Images/{finalClassName}");
                                     File.Move(auxPath + $"/{oldFileName}", Directory.GetCurrentDirectory() + $"/Images/{finalClassName}/{oldFileName}");
                                 }
                                 File.Delete(imgPath);
-                            } 
+                            }
                             catch { }
                         }
                         else if (oldHasImg && auxPath != "")
@@ -1068,6 +1127,142 @@ namespace Server
             TimeSpan.TryParse(c.Hora, out var ts);
             var end = c.Fecha.Date.Add(ts).AddMinutes(c.Duracion);
             return DateTime.Now >= end;
+        }
+
+        static void ScheduleWebhook(Clase clase, string webhookUrl, string userName)
+        {
+            try
+            {
+                TimeSpan.TryParse(clase.Hora, out var timeSpan);
+                var classStartTime = clase.Fecha.Date.Add(timeSpan);
+                var webhookTime = classStartTime.AddMinutes(-1); // 1 minuto antes
+
+                if (webhookTime <= DateTime.Now)
+                {
+                    // Si ya pasó el tiempo, llamar inmediatamente
+                    _ = Task.Run(async () => await CallWebhookAsync(webhookUrl, clase, userName));
+                    return;
+                }
+
+                var delay = webhookTime - DateTime.Now;
+                string timerKey = $"{userName}|{clase.Nombre}";
+
+                lock (timerLock)
+                {
+                    if (webhookTimers.TryGetValue(timerKey, out var existingTimer))
+                    {
+                        existingTimer?.Dispose();
+                    }
+
+                    var timer = new System.Threading.Timer(async _ =>
+                    {
+                        await CallWebhookAsync(webhookUrl, clase, userName);
+                        lock (timerLock)
+                        {
+                            webhookTimers.Remove(timerKey);
+                        }
+                    }, null, delay, Timeout.InfiniteTimeSpan);
+
+                    webhookTimers[timerKey] = timer;
+                    Console.WriteLine($"Webhook programado para {webhookTime:yyyy-MM-dd HH:mm:ss} para clase {clase.Nombre}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error programando webhook: {ex.Message}");
+            }
+        }
+
+        static async Task CallWebhookAsync(string webhookUrl, Clase clase, string userName)
+        {
+            try
+            {
+                using var httpClient = new System.Net.Http.HttpClient();
+                var payload = new
+                {
+                    message = $"La clase '{clase.Nombre}' comenzará en 1 minuto",
+                    clase = clase.Nombre,
+                    usuario = userName,
+                    fecha = clase.Fecha.ToString("yyyy-MM-dd"),
+                    hora = clase.Hora
+                };
+
+                var json = System.Text.Json.JsonSerializer.Serialize(payload);
+                var content = new System.Net.Http.StringContent(json, Encoding.UTF8, "application/json");
+
+                var response = await httpClient.PostAsync(webhookUrl, content);
+                Console.WriteLine($"Webhook llamado para clase {clase.Nombre}. Status: {response.StatusCode}");
+                LogHelper.SendLog(userName, clase.Nombre, "Webhook llamado", $"Webhook llamado para clase {clase.Nombre}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error llamando webhook: {ex.Message}");
+            }
+        }
+
+        static async Task StartWebhookScheduler()
+        {
+            while (running)
+            {
+                try
+                {
+                    await Task.Delay(60000); // Verificar cada minuto
+
+                    List<Clase> classesToCheck;
+                    lock (clasesLock)
+                    {
+                        classesToCheck = classes.ToList();
+                    }
+
+                    foreach (var clase in classesToCheck)
+                    {
+                        TimeSpan.TryParse(clase.Hora, out var timeSpan);
+                        var classStartTime = clase.Fecha.Date.Add(timeSpan);
+                        var webhookTime = classStartTime.AddMinutes(-1);
+
+                        if (webhookTime > DateTime.Now && webhookTime <= DateTime.Now.AddMinutes(1))
+                        {
+                            // Verificar si hay webhooks para esta clase
+                            lock (webhookLock)
+                            {
+                                foreach (var usuario in clase.usuarios)
+                                {
+                                    string webhookKey = $"{usuario.nombre}|{clase.Nombre}";
+                                    if (classWebhooks.TryGetValue(webhookKey, out var webhookUrl))
+                                    {
+                                        ScheduleWebhook(clase, webhookUrl, usuario.nombre);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error en webhook scheduler: {ex.Message}");
+                }
+            }
+        }
+
+        static async Task StartGrpcServerAsync()
+        {
+            try
+            {
+                var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+                builder.Services.AddGrpc();
+                var app = builder.Build();
+
+                app.MapGrpcService<AuthServiceImpl>();
+                app.MapGet("/", () => "gRPC server is running");
+
+                string grpcPort = Environment.GetEnvironmentVariable("GRPC_PORT") ?? "5002";
+                Console.WriteLine($"gRPC server listening on http://0.0.0.0:{grpcPort}");
+                await app.RunAsync($"http://0.0.0.0:{grpcPort}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error starting gRPC server: {ex.Message}");
+            }
         }
     }
 }

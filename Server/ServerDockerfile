@@ -1,0 +1,35 @@
+# Multi-stage build para optimizar el tamaño de la imagen
+# Stage 1: Build
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
+
+# Copiar archivos del proyecto
+COPY Server/Server.csproj ./Server/
+COPY Common/Common.csproj ./Common/
+COPY Server/Protos ./Server/Protos/
+
+# Restaurar dependencias
+RUN dotnet restore ./Server/Server.csproj
+
+# Copiar código fuente
+COPY Server ./Server
+COPY Common ./Common
+
+# Build en modo Release
+WORKDIR /src/Server
+RUN dotnet build -c Release -o /app/build
+
+# Stage 2: Publish
+FROM build AS publish
+RUN dotnet publish -c Release -o /app/publish
+
+# Stage 3: Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
+WORKDIR /app
+
+# Copiar solo los archivos publicados desde el stage de publish
+COPY --from=publish /app/publish .
+
+# El tamaño de la imagen runtime es significativamente menor que la imagen SDK
+# La imagen SDK (~800MB) vs Runtime (~200MB) = ahorro de ~600MB por contenedor
+ENTRYPOINT ["dotnet", "Server.dll"]
