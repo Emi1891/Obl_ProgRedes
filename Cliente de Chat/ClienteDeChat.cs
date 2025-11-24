@@ -10,30 +10,30 @@ namespace Cliente_de_Chat_
     {
         static async Task Main(string[] args)
         {
-            Console.WriteLine("=== Cliente de Chat ===");
+            Console.WriteLine("=== Chat Client ===");
             Console.WriteLine();
 
-            Console.Write("Ingrese el link o código de la clase: ");
+            Console.Write("Enter class link: ");
             string? link = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(link))
             {
-                Console.WriteLine("Link inválido.");
+                Console.WriteLine("Invalid link.");
                 return;
             }
 
-            Console.Write("Ingrese su nombre de usuario: ");
+            Console.Write("Enter your username: ");
             string? username = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(username))
             {
-                Console.WriteLine("Nombre de usuario inválido.");
+                Console.WriteLine("Invalid username.");
                 return;
             }
 
-            Console.Write("Ingrese su contraseña: ");
+            Console.Write("Enter your password: ");
             string? password = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(password))
             {
-                Console.WriteLine("Contraseña inválida.");
+                Console.WriteLine("Invalid password.");
                 return;
             }
 
@@ -72,13 +72,13 @@ namespace Cliente_de_Chat_
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Error recibiendo mensaje: {ex.Message}");
+                            Console.WriteLine($"Error receiving message: {ex.Message}");
                             break;
                         }
                     }
                 });
 
-                // Leer mensajes del usuario y enviarlos
+                // Read messages from user and send them
                 while (client.State == WebSocketState.Open)
                 {
                     var input = Console.ReadLine();
@@ -97,7 +97,7 @@ namespace Cliente_de_Chat_
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"Error enviando mensaje: {ex.Message}");
+                        Console.WriteLine($"Error sending message: {ex.Message}");
                         break;
                     }
                 }
@@ -106,10 +106,10 @@ namespace Cliente_de_Chat_
             }
             catch (WebSocketException ex)
             {
-                Console.WriteLine($"Error de conexión: {ex.Message}");
+                Console.WriteLine($"Connection error: {ex.Message}");
                 if (ex.InnerException != null)
                 {
-                    Console.WriteLine($"Detalles: {ex.InnerException.Message}");
+                    Console.WriteLine($"Details: {ex.InnerException.Message}");
                 }
             }
             catch (Exception ex)
@@ -117,7 +117,7 @@ namespace Cliente_de_Chat_
                 Console.WriteLine($"Error: {ex.Message}");
             }
 
-            Console.WriteLine("\nDesconectado del chat.");
+            Console.WriteLine("\nDisconnected from chat.");
         }
     }
 }

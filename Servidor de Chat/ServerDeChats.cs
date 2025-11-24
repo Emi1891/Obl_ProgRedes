@@ -98,7 +98,7 @@ namespace Servidor_de_Chat
                             }
 
                             // Enviar mensaje de bienvenida
-                            var welcomeMsg = $"[Sistema] {username} se unió al chat";
+                            var welcomeMsg = $"[System] {username} joined the chat";
                             await BroadcastMessage(className, welcomeMsg, webSocket);
 
                             // Escuchar mensajes
@@ -120,7 +120,7 @@ namespace Servidor_de_Chat
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"Error procesando mensaje de {username}: {ex.Message}");
+                                    Console.WriteLine($"Error processing message from {username}: {ex.Message}");
                                     break;
                                 }
                             }
@@ -129,7 +129,7 @@ namespace Servidor_de_Chat
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error en WebSocket: {ex.Message}");
+                    Console.WriteLine($"Error in WebSocket: {ex.Message}");
                 }
                 finally
                 {
@@ -153,7 +153,7 @@ namespace Servidor_de_Chat
 
                         if (!string.IsNullOrEmpty(username))
                         {
-                            var leaveMsg = $"[Sistema] {username} abandonó el chat";
+                            var leaveMsg = $"[System] {username} left the chat";
                             await BroadcastMessage(className, leaveMsg, null);
                         }
                     }
@@ -189,7 +189,7 @@ namespace Servidor_de_Chat
                 var authResponse = await client.ValidateCredentialsAsync(authRequest);
                 if (!authResponse.Valid)
                 {
-                    Console.WriteLine($"Credenciales inválidas para usuario: {username}");
+                    Console.WriteLine($"Invalid credentials for user: {username}");
                     return false;
                 }
 
@@ -198,7 +198,7 @@ namespace Servidor_de_Chat
                 var linkResponse = await client.ValidateClassLinkAsync(linkRequest);
                 if (!linkResponse.Valid)
                 {
-                    Console.WriteLine($"Link inválido: {link}");
+                    Console.WriteLine($"Invalid link: {link}");
                     return false;
                 }
 
@@ -206,7 +206,7 @@ namespace Servidor_de_Chat
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error validando usuario/link: {ex.Message}");
+                Console.WriteLine($"Error validating user/link: {ex.Message}");
                 return false;
             }
         }
@@ -252,7 +252,7 @@ namespace Servidor_de_Chat
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"Error enviando mensaje a cliente: {ex.Message}");
+                            Console.WriteLine($"Error sending message to client: {ex.Message}");
                         }
                     }));
                 }
