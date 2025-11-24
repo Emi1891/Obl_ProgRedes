@@ -40,11 +40,7 @@ namespace Servidor_de_Logs_
         static async Task Main(string[] args)
         {
             Console.WriteLine("Starting Log Server...");
-
-            // Iniciar RabbitMQ consumer en background
             _ = Task.Run(() => StartRabbitMQConsumer());
-
-            // Iniciar REST API
             var builder = WebApplication.CreateBuilder(args);
             builder.Services.AddControllers();
             var app = builder.Build();
