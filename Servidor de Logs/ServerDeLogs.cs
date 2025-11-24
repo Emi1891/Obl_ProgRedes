@@ -9,7 +9,6 @@ using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -33,11 +32,65 @@ namespace Servidor_de_Logs_
         public string? Evento { get; set; }
     }
 
-    class Program
+    public static class LogService
     {
         private static readonly List<LogEntry> logs = new List<LogEntry>();
         private static readonly object logsLock = new object();
 
+        public static void AddLog(LogEntry logEntry)
+        {
+            lock (logsLock)
+            {
+                logs.Add(logEntry);
+            }
+        }
+
+        public static List<LogEntry> GetAllLogs()
+        {
+            lock (logsLock)
+            {
+                return new List<LogEntry>(logs);
+            }
+        }
+
+        public static List<LogEntry> GetFilteredLogs(LogFilter filter)
+        {
+            lock (logsLock)
+            {
+                IEnumerable<LogEntry> query = logs;
+
+                if (!string.IsNullOrEmpty(filter.Usuario))
+                {
+                    query = query.Where(l => l.Usuario.Contains(filter.Usuario, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (!string.IsNullOrEmpty(filter.Clase))
+                {
+                    query = query.Where(l => l.Clase.Contains(filter.Clase, StringComparison.OrdinalIgnoreCase));
+                }
+
+                if (filter.FechaDesde.HasValue)
+                {
+                    query = query.Where(l => l.Fecha >= filter.FechaDesde.Value);
+                }
+
+                if (filter.FechaHasta.HasValue)
+                {
+                    query = query.Where(l => l.Fecha <= filter.FechaHasta.Value);
+                }
+
+                if (!string.IsNullOrEmpty(filter.Evento))
+                {
+                    query = query.Where(l => l.Evento.Contains(filter.Evento, StringComparison.OrdinalIgnoreCase));
+                }
+
+                return query.OrderByDescending(l => l.Fecha).ToList();
+            }
+        }
+    }
+
+    class Program
+    {
         static async Task Main(string[] args)
         {
             Console.WriteLine("Starting Log Server...");
@@ -46,32 +99,7 @@ namespace Servidor_de_Logs_
             builder.Services.AddControllers();
             var app = builder.Build();
 
-            app.MapGet("/logs", async (HttpContext context) =>
-            {
-                var usuario = context.Request.Query["usuario"].ToString();
-                var clase = context.Request.Query["clase"].ToString();
-                var fechaDesde = context.Request.Query["fechaDesde"].ToString();
-                var fechaHasta = context.Request.Query["fechaHasta"].ToString();
-                var evento = context.Request.Query["evento"].ToString();
-
-                var filter = new LogFilter
-                {
-                    Usuario = string.IsNullOrEmpty(usuario) ? null : usuario,
-                    Clase = string.IsNullOrEmpty(clase) ? null : clase,
-                    FechaDesde = string.IsNullOrEmpty(fechaDesde) ? null : DateTime.TryParse(fechaDesde, out var fd) ? fd : null,
-                    FechaHasta = string.IsNullOrEmpty(fechaHasta) ? null : DateTime.TryParse(fechaHasta, out var fh) ? fh : null,
-                    Evento = string.IsNullOrEmpty(evento) ? null : evento
-                };
-
-                var filteredLogs = GetFilteredLogs(filter);
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(filteredLogs));
-            });
-
-            app.MapGet("/health", async (HttpContext context) =>
-            {
-                await context.Response.WriteAsync("OK");
-            });
+            app.MapControllers();
 
             Console.WriteLine("Log Server REST API listening on http://localhost:5001");
             await app.RunAsync("http://0.0.0.0:5001");
@@ -107,10 +135,7 @@ namespace Servidor_de_Logs_
                             var logEntry = JsonSerializer.Deserialize<LogEntry>(message);
                             if (logEntry != null)
                             {
-                                lock (logsLock)
-                                {
-                                    logs.Add(logEntry);
-                                }
+                                LogService.AddLog(logEntry);
                                 Console.WriteLine($"Log received: {logEntry.Evento} - {logEntry.Usuario} - {logEntry.Clase}");
                             }
                         }
@@ -138,41 +163,6 @@ namespace Servidor_de_Logs_
                     Console.WriteLine($"Error starting RabbitMQ consumer: {ex.Message}. Retrying in 5 seconds...");
                     Thread.Sleep(TimeSpan.FromSeconds(5));
                 }
-            }
-        }
-
-        static List<LogEntry> GetFilteredLogs(LogFilter filter)
-        {
-            lock (logsLock)
-            {
-                IEnumerable<LogEntry> query = logs;
-
-                if (!string.IsNullOrEmpty(filter.Usuario))
-                {
-                    query = query.Where(l => l.Usuario.Contains(filter.Usuario, StringComparison.OrdinalIgnoreCase));
-                }
-
-                if (!string.IsNullOrEmpty(filter.Clase))
-                {
-                    query = query.Where(l => l.Clase.Contains(filter.Clase, StringComparison.OrdinalIgnoreCase));
-                }
-
-                if (filter.FechaDesde.HasValue)
-                {
-                    query = query.Where(l => l.Fecha >= filter.FechaDesde.Value);
-                }
-
-                if (filter.FechaHasta.HasValue)
-                {
-                    query = query.Where(l => l.Fecha <= filter.FechaHasta.Value);
-                }
-
-                if (!string.IsNullOrEmpty(filter.Evento))
-                {
-                    query = query.Where(l => l.Evento.Contains(filter.Evento, StringComparison.OrdinalIgnoreCase));
-                }
-
-                return query.OrderByDescending(l => l.Fecha).ToList();
             }
         }
     }
