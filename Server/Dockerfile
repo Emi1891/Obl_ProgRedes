@@ -2,6 +2,9 @@ FROM mcr.microsoft.com/dotnet/sdk:8.0
 
 WORKDIR /app
 
+# Instalar tzdata para soportar zonas horarias
+RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
+
 ENV SERVER_HOSTNAME=server
 ENV SERVER_PORT=5000
 

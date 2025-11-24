@@ -29,6 +29,7 @@ services:
       - RABBITMQ_USER=guest
       - RABBITMQ_PASSWORD=guest
       - IMAGES_DIR=/images
+      - TZ=America/Montevideo
     volumes:
       - ./server-images:/images
     stdin_open: true

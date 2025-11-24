@@ -649,6 +649,11 @@ namespace Server
                         {
                             classWebhooks[webhookKey] = webhookUrl;
                         }
+                        
+                        // Enviar webhook inmediato de inscripción
+                        _ = Task.Run(async () => await CallEnrollmentWebhookAsync(webhookUrl, joinedClass, userName));
+                        
+                        // Programar webhook de alerta 1 minuto antes
                         ScheduleWebhook(joinedClass, webhookUrl, userName);
                     }
 
@@ -1134,52 +1139,147 @@ namespace Server
         {
             try
             {
-                TimeSpan.TryParse(clase.Hora, out var timeSpan);
+                var now = DateTime.Now;
+                Console.WriteLine($"[DEBUG] ScheduleWebhook - Hora actual del servidor: {now:yyyy-MM-dd HH:mm:ss}");
+                
+                // Intentar parsear la hora en formato HH:mm o HH:MM
+                if (!TimeSpan.TryParse(clase.Hora, out var timeSpan))
+                {
+                    // Si falla, intentar parsear como HH:mm manualmente
+                    var parts = clase.Hora.Split(':');
+                    if (parts.Length == 2 && int.TryParse(parts[0], out int hours) && int.TryParse(parts[1], out int minutes))
+                    {
+                        timeSpan = new TimeSpan(hours, minutes, 0);
+                        Console.WriteLine($"[DEBUG] Hora parseada manualmente: {timeSpan}");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[ERROR] No se pudo parsear la hora: {clase.Hora}");
+                        return;
+                    }
+                }
+                
                 var classStartTime = clase.Fecha.Date.Add(timeSpan);
                 var webhookTime = classStartTime.AddMinutes(-1); // 1 minuto antes
 
+                Console.WriteLine($"[DEBUG] Clase: {clase.Nombre}, Fecha: {clase.Fecha:yyyy-MM-dd}, Hora: {clase.Hora}");
+                Console.WriteLine($"[DEBUG] TimeSpan parseado: {timeSpan}");
+                Console.WriteLine($"[DEBUG] Tiempo de inicio de clase: {classStartTime:yyyy-MM-dd HH:mm:ss}");
+                Console.WriteLine($"[DEBUG] Tiempo del webhook (1 min antes): {webhookTime:yyyy-MM-dd HH:mm:ss}");
+
                 // Solo enviar el webhook si la clase aún no ha comenzado
-                if (classStartTime <= DateTime.Now)
+                if (classStartTime <= now)
                 {
                     // La clase ya comenzó o ya pasó, no enviar webhook
-                    Console.WriteLine($"La clase {clase.Nombre} ya comenzó o ya pasó. No se enviará webhook.");
+                    Console.WriteLine($"[DEBUG] La clase {clase.Nombre} ya comenzó o ya pasó. Hora actual: {now:yyyy-MM-dd HH:mm:ss}, Hora inicio: {classStartTime:yyyy-MM-dd HH:mm:ss}");
                     return;
                 }
 
                 // Si el tiempo del webhook ya pasó pero la clase aún no comenzó, no enviar
                 // (esto puede pasar si el usuario se une muy cerca del inicio)
-                if (webhookTime <= DateTime.Now)
+                if (webhookTime <= now)
                 {
-                    Console.WriteLine($"El tiempo para enviar el webhook de la clase {clase.Nombre} ya pasó. No se enviará.");
+                    Console.WriteLine($"[DEBUG] El tiempo para enviar el webhook de la clase {clase.Nombre} ya pasó. Hora actual: {now:yyyy-MM-dd HH:mm:ss}, Hora webhook: {webhookTime:yyyy-MM-dd HH:mm:ss}");
                     return;
                 }
 
-                var delay = webhookTime - DateTime.Now;
+                var delay = webhookTime - now;
                 string timerKey = $"{userName}|{clase.Nombre}";
+
+                Console.WriteLine($"[DEBUG] Delay calculado: {delay.TotalSeconds:F2} segundos ({delay.TotalMinutes:F2} minutos)");
+
+                // Validar que el delay sea positivo
+                if (delay.TotalMilliseconds <= 0)
+                {
+                    Console.WriteLine($"[ERROR] Delay negativo o cero: {delay.TotalMilliseconds} ms. No se puede programar el webhook.");
+                    return;
+                }
+
+                // System.Threading.Timer tiene un límite máximo de aproximadamente 2^31-1 milisegundos
+                // Si el delay es muy grande, usar Task.Delay en su lugar
+                long delayMs = (long)delay.TotalMilliseconds;
+                const long maxTimerDelay = int.MaxValue - 1; // ~24.8 días
 
                 lock (timerLock)
                 {
                     if (webhookTimers.TryGetValue(timerKey, out var existingTimer))
                     {
                         existingTimer?.Dispose();
+                        Console.WriteLine($"[DEBUG] Timer existente eliminado para {timerKey}");
                     }
 
-                    var timer = new System.Threading.Timer(async _ =>
+                    if (delayMs > maxTimerDelay)
                     {
-                        await CallWebhookAsync(webhookUrl, clase, userName);
-                        lock (timerLock)
+                        // Delay muy grande, usar Task.Delay en lugar de Timer
+                        Console.WriteLine($"[DEBUG] Delay muy grande ({delay.TotalDays:F2} días), usando Task.Delay en lugar de Timer");
+                        _ = Task.Run(async () =>
                         {
-                            webhookTimers.Remove(timerKey);
-                        }
-                    }, null, delay, Timeout.InfiniteTimeSpan);
+                            await Task.Delay(delay);
+                            Console.WriteLine($"[DEBUG] Task.Delay completado para clase {clase.Nombre} (usuario: {userName})");
+                            await CallWebhookAsync(webhookUrl, clase, userName);
+                            lock (timerLock)
+                            {
+                                webhookTimers.Remove(timerKey);
+                                Console.WriteLine($"[DEBUG] Timer removido de la lista para {timerKey}");
+                            }
+                        });
+                    }
+                    else
+                    {
+                        // Delay normal, usar Timer
+                        var timer = new System.Threading.Timer(_ =>
+                        {
+                            Console.WriteLine($"[DEBUG] Timer ejecutado para clase {clase.Nombre} (usuario: {userName})");
+                            // Ejecutar el webhook de forma asíncrona
+                            _ = Task.Run(async () =>
+                            {
+                                await CallWebhookAsync(webhookUrl, clase, userName);
+                                lock (timerLock)
+                                {
+                                    webhookTimers.Remove(timerKey);
+                                    Console.WriteLine($"[DEBUG] Timer removido de la lista para {timerKey}");
+                                }
+                            });
+                        }, null, TimeSpan.FromMilliseconds(delayMs), Timeout.InfiniteTimeSpan);
 
-                    webhookTimers[timerKey] = timer;
-                    Console.WriteLine($"Webhook programado para {webhookTime:yyyy-MM-dd HH:mm:ss} para clase {clase.Nombre} (usuario: {userName})");
+                        webhookTimers[timerKey] = timer;
+                        Console.WriteLine($"[DEBUG] Webhook programado para {webhookTime:yyyy-MM-dd HH:mm:ss} para clase {clase.Nombre} (usuario: {userName}, delay: {delay.TotalMinutes:F2} minutos, {delay.TotalSeconds:F2} segundos, {delayMs} ms)");
+                    }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error programando webhook: {ex.Message}");
+                Console.WriteLine($"[ERROR] Error programando webhook: {ex.Message}");
+                Console.WriteLine($"[ERROR] Stack trace: {ex.StackTrace}");
+            }
+        }
+
+        static async Task CallEnrollmentWebhookAsync(string webhookUrl, Clase clase, string userName)
+        {
+            try
+            {
+                using var httpClient = new System.Net.Http.HttpClient();
+                var payload = new
+                {
+                    message = $"Te has inscrito exitosamente a la clase '{clase.Nombre}'",
+                    clase = clase.Nombre,
+                    usuario = userName,
+                    fecha = clase.Fecha.ToString("yyyy-MM-dd"),
+                    hora = clase.Hora,
+                    link = clase.Link,
+                    tipo = "inscripcion"
+                };
+
+                var json = System.Text.Json.JsonSerializer.Serialize(payload);
+                var content = new System.Net.Http.StringContent(json, Encoding.UTF8, "application/json");
+
+                var response = await httpClient.PostAsync(webhookUrl, content);
+                Console.WriteLine($"Webhook de inscripción enviado para clase {clase.Nombre} (usuario: {userName}). Status: {response.StatusCode}");
+                LogHelper.SendLog(userName, clase.Nombre, "Webhook de inscripción enviado", $"Webhook de inscripción enviado para clase {clase.Nombre}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error llamando webhook de inscripción: {ex.Message}");
             }
         }
 
@@ -1195,19 +1295,20 @@ namespace Server
                     usuario = userName,
                     fecha = clase.Fecha.ToString("yyyy-MM-dd"),
                     hora = clase.Hora,
-                    link = clase.Link
+                    link = clase.Link,
+                    tipo = "alerta"
                 };
 
                 var json = System.Text.Json.JsonSerializer.Serialize(payload);
                 var content = new System.Net.Http.StringContent(json, Encoding.UTF8, "application/json");
 
                 var response = await httpClient.PostAsync(webhookUrl, content);
-                Console.WriteLine($"Webhook llamado para clase {clase.Nombre}. Status: {response.StatusCode}");
-                LogHelper.SendLog(userName, clase.Nombre, "Webhook llamado", $"Webhook llamado para clase {clase.Nombre}");
+                Console.WriteLine($"Webhook de alerta enviado para clase {clase.Nombre} (usuario: {userName}). Status: {response.StatusCode}");
+                LogHelper.SendLog(userName, clase.Nombre, "Webhook de alerta enviado", $"Webhook de alerta enviado para clase {clase.Nombre}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error llamando webhook: {ex.Message}");
+                Console.WriteLine($"Error llamando webhook de alerta: {ex.Message}");
             }
         }
 
