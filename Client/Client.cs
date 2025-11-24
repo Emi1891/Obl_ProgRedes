@@ -82,7 +82,7 @@ namespace Client
             while (!connected)
             {
                 try { await clientSocket.ConnectAsync(serverEndPoint).ConfigureAwait(false); connected = true; Console.WriteLine("\nConnected to server"); }
-                catch { Console.WriteLine("\nCould not connect to server. Retrying in 3 seconds..."); await Task.Delay(3000).ConfigureAwait(false); }
+                catch { Console.WriteLine($"\nCould not connect to server at address {serverEndPoint.Address}:{serverEndPoint.Port}. Retrying in 3 seconds..."); await Task.Delay(3000).ConfigureAwait(false); }
             }
 
             _socket = clientSocket;

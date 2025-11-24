@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -78,53 +79,65 @@ namespace Servidor_de_Logs_
 
         static void StartRabbitMQConsumer()
         {
-            try
+            while (true)
             {
-                var factory = new ConnectionFactory()
+                try
                 {
-                    HostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost",
-                    Port = int.Parse(Environment.GetEnvironmentVariable("RABBITMQ_PORT") ?? "5672"),
-                    UserName = Environment.GetEnvironmentVariable("RABBITMQ_USER") ?? "guest",
-                    Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD") ?? "guest"
-                };
-
-                using var connection = factory.CreateConnection();
-                using var channel = connection.CreateModel();
-
-                channel.QueueDeclare(queue: "logs", durable: false, exclusive: false, autoDelete: false, arguments: null);
-
-                var consumer = new EventingBasicConsumer(channel);
-                consumer.Received += (model, ea) =>
-                {
-                    var body = ea.Body.ToArray();
-                    var message = Encoding.UTF8.GetString(body);
-
-                    try
+                    var factory = new ConnectionFactory()
                     {
-                        var logEntry = JsonSerializer.Deserialize<LogEntry>(message);
-                        if (logEntry != null)
+                        HostName = Environment.GetEnvironmentVariable("RABBITMQ_HOST") ?? "localhost",
+                        Port = int.Parse(Environment.GetEnvironmentVariable("RABBITMQ_PORT") ?? "5672"),
+                        UserName = Environment.GetEnvironmentVariable("RABBITMQ_USER") ?? "guest",
+                        Password = Environment.GetEnvironmentVariable("RABBITMQ_PASSWORD") ?? "guest"
+                    };
+
+                    using var connection = factory.CreateConnection();
+                    using var channel = connection.CreateModel();
+
+                    channel.QueueDeclare(queue: "logs", durable: false, exclusive: false, autoDelete: false, arguments: null);
+
+                    var consumer = new EventingBasicConsumer(channel);
+                    consumer.Received += (model, ea) =>
+                    {
+                        var body = ea.Body.ToArray();
+                        var message = Encoding.UTF8.GetString(body);
+
+                        try
                         {
-                            lock (logsLock)
+                            var logEntry = JsonSerializer.Deserialize<LogEntry>(message);
+                            if (logEntry != null)
                             {
-                                logs.Add(logEntry);
+                                lock (logsLock)
+                                {
+                                    logs.Add(logEntry);
+                                }
+                                Console.WriteLine($"Log received: {logEntry.Evento} - {logEntry.Usuario} - {logEntry.Clase}");
                             }
-                            Console.WriteLine($"Log received: {logEntry.Evento} - {logEntry.Usuario} - {logEntry.Clase}");
                         }
-                    }
-                    catch (Exception ex)
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error processing log message: {ex.Message}");
+                        }
+                    };
+
+                    channel.BasicConsume(queue: "logs", autoAck: true, consumer: consumer);
+
+                    Console.WriteLine("RabbitMQ consumer started. Waiting for logs...");
+
+                    var waitHandle = new ManualResetEventSlim(false);
+                    connection.ConnectionShutdown += (_, __) =>
                     {
-                        Console.WriteLine($"Error processing log message: {ex.Message}");
-                    }
-                };
+                        Console.WriteLine("RabbitMQ connection closed. Reconnecting...");
+                        waitHandle.Set();
+                    };
 
-                channel.BasicConsume(queue: "logs", autoAck: true, consumer: consumer);
-
-                Console.WriteLine("RabbitMQ consumer started. Waiting for logs...");
-                Console.ReadLine();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error starting RabbitMQ consumer: {ex.Message}");
+                    waitHandle.Wait();
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error starting RabbitMQ consumer: {ex.Message}. Retrying in 5 seconds...");
+                    Thread.Sleep(TimeSpan.FromSeconds(5));
+                }
             }
         }
 

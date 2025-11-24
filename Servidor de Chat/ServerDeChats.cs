@@ -36,6 +36,9 @@ namespace Servidor_de_Chat
             var builder = WebApplication.CreateBuilder(args);
             var app = builder.Build();
 
+            // Habilitar WebSockets
+            app.UseWebSockets();
+
             // WebSocket endpoint para chat
             app.Map("/chat", async (HttpContext context) =>
             {
@@ -101,15 +104,23 @@ namespace Servidor_de_Chat
                             // Escuchar mensajes
                             while (webSocket.State == WebSocketState.Open)
                             {
-                                result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                                if (result.MessageType == WebSocketMessageType.Text)
+                                try
                                 {
-                                    var chatMessage = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                                    var fullMessage = $"[{username}] {chatMessage}";
-                                    await BroadcastMessage(className, fullMessage, webSocket);
+                                    result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                                    if (result.MessageType == WebSocketMessageType.Text)
+                                    {
+                                        var chatMessage = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                                        var fullMessage = $"[{username}] {chatMessage}";
+                                        await BroadcastMessage(className, fullMessage, webSocket);
+                                    }
+                                    else if (result.MessageType == WebSocketMessageType.Close)
+                                    {
+                                        break;
+                                    }
                                 }
-                                else if (result.MessageType == WebSocketMessageType.Close)
+                                catch (Exception ex)
                                 {
+                                    Console.WriteLine($"Error procesando mensaje de {username}: {ex.Message}");
                                     break;
                                 }
                             }
@@ -213,26 +224,43 @@ namespace Servidor_de_Chat
 
         static async Task BroadcastMessage(string className, string message, WebSocket? sender)
         {
+            ChatRoom? room = null;
             lock (roomsLock)
             {
                 if (!chatRooms.ContainsKey(className)) return;
+                room = chatRooms[className];
+            }
 
-                var room = chatRooms[className];
-                lock (room.Lock)
+            List<WebSocket> clientsToNotify;
+            lock (room.Lock)
+            {
+                clientsToNotify = new List<WebSocket>(room.Clients);
+            }
+
+            var messageBytes = Encoding.UTF8.GetBytes(message);
+            var tasks = new List<Task>();
+
+            foreach (var client in clientsToNotify)
+            {
+                if (client != sender && client.State == WebSocketState.Open)
                 {
-                    var messageBytes = Encoding.UTF8.GetBytes(message);
-                    var tasks = new List<Task>();
-
-                    foreach (var client in room.Clients)
+                    tasks.Add(Task.Run(async () =>
                     {
-                        if (client != sender && client.State == WebSocketState.Open)
+                        try
                         {
-                            tasks.Add(client.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None));
+                            await client.SendAsync(new ArraySegment<byte>(messageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
                         }
-                    }
-
-                    Task.WaitAll(tasks.ToArray());
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"Error enviando mensaje a cliente: {ex.Message}");
+                        }
+                    }));
                 }
+            }
+
+            if (tasks.Count > 0)
+            {
+                await Task.WhenAll(tasks);
             }
         }
     }

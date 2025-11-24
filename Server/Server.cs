@@ -14,6 +14,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 namespace Server
 {
@@ -1249,6 +1250,17 @@ namespace Server
             try
             {
                 var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+                
+                // Configurar Kestrel para aceptar HTTP/2 sin TLS
+                builder.WebHost.ConfigureKestrel(options =>
+                {
+                    string grpcPort = Environment.GetEnvironmentVariable("GRPC_PORT") ?? "5002";
+                    options.ListenAnyIP(int.Parse(grpcPort), listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http2;
+                    });
+                });
+                
                 builder.Services.AddGrpc();
                 var app = builder.Build();
 
@@ -1257,7 +1269,7 @@ namespace Server
 
                 string grpcPort = Environment.GetEnvironmentVariable("GRPC_PORT") ?? "5002";
                 Console.WriteLine($"gRPC server listening on http://0.0.0.0:{grpcPort}");
-                await app.RunAsync($"http://0.0.0.0:{grpcPort}");
+                await app.RunAsync();
             }
             catch (Exception ex)
             {
