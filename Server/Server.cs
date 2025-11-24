@@ -1138,10 +1138,19 @@ namespace Server
                 var classStartTime = clase.Fecha.Date.Add(timeSpan);
                 var webhookTime = classStartTime.AddMinutes(-1); // 1 minuto antes
 
+                // Solo enviar el webhook si la clase aún no ha comenzado
+                if (classStartTime <= DateTime.Now)
+                {
+                    // La clase ya comenzó o ya pasó, no enviar webhook
+                    Console.WriteLine($"La clase {clase.Nombre} ya comenzó o ya pasó. No se enviará webhook.");
+                    return;
+                }
+
+                // Si el tiempo del webhook ya pasó pero la clase aún no comenzó, no enviar
+                // (esto puede pasar si el usuario se une muy cerca del inicio)
                 if (webhookTime <= DateTime.Now)
                 {
-                    // Si ya pasó el tiempo, llamar inmediatamente
-                    _ = Task.Run(async () => await CallWebhookAsync(webhookUrl, clase, userName));
+                    Console.WriteLine($"El tiempo para enviar el webhook de la clase {clase.Nombre} ya pasó. No se enviará.");
                     return;
                 }
 
@@ -1165,7 +1174,7 @@ namespace Server
                     }, null, delay, Timeout.InfiniteTimeSpan);
 
                     webhookTimers[timerKey] = timer;
-                    Console.WriteLine($"Webhook programado para {webhookTime:yyyy-MM-dd HH:mm:ss} para clase {clase.Nombre}");
+                    Console.WriteLine($"Webhook programado para {webhookTime:yyyy-MM-dd HH:mm:ss} para clase {clase.Nombre} (usuario: {userName})");
                 }
             }
             catch (Exception ex)
@@ -1185,7 +1194,8 @@ namespace Server
                     clase = clase.Nombre,
                     usuario = userName,
                     fecha = clase.Fecha.ToString("yyyy-MM-dd"),
-                    hora = clase.Hora
+                    hora = clase.Hora,
+                    link = clase.Link
                 };
 
                 var json = System.Text.Json.JsonSerializer.Serialize(payload);
