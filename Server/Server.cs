@@ -55,15 +55,13 @@ namespace Server
         {
             LogHelper.Initialize();
             
-            // Esperar a que RabbitMQ esté disponible antes de enviar logs de inicialización
-            // Esto asegura que los logs de usuarios/clases por defecto se envíen correctamente
+            
             if (!LogHelper.WaitForConnection())
             {
                 Console.WriteLine("Warning: Could not establish RabbitMQ connection. Default logs may not be sent.");
             }
             else
             {
-                // Pequeño delay adicional para asegurar que el servidor de logs tenga tiempo de conectarse
                 await Task.Delay(1000);
             }
 
@@ -134,10 +132,8 @@ namespace Server
             sharedClass12.AgregarUsuario(user2);
             LogHelper.SendLog("user2", "Shared Class 1-2", "User enrolled in class", "User user2 enrolled in the class Shared Class 1-2");
 
-            // Iniciar tarea para verificar webhooks
             _ = Task.Run(() => StartWebhookScheduler());
 
-            // Iniciar servidor gRPC en background
             _ = Task.Run(async () => await StartGrpcServerAsync());
 
             Console.WriteLine("Starting Server Application ... ");
@@ -149,7 +145,7 @@ namespace Server
             IPAddress? serverIp;
             if (serverHostnameString == "0.0.0.0" || serverHostnameString == "::0")
             {
-                serverIp = IPAddress.Any; // Usar Any para escuchar en todas las interfaces
+                serverIp = IPAddress.Any; 
             }
             else
             {
@@ -170,7 +166,6 @@ namespace Server
             listener.Start();
             Console.WriteLine($"Server waiting for connection on {serverIp}:{serverPort} ...");
 
-            // Console key listener runs on a background task so we can stop the listener with 'q' and request reports
             _ = Task.Run(() =>
             {
                 while (running)
@@ -251,7 +246,7 @@ namespace Server
                     }
                     catch (ObjectDisposedException)
                     {
-                        break; // listener stopped
+                        break; 
                     }
                     catch (InvalidOperationException)
                     {
@@ -277,7 +272,7 @@ namespace Server
                     int clientNum = currentClients;
                     Console.WriteLine($"Client connected. Current clients: {currentClients}");
 
-                    // Fire-and-forget client handler (exceptions handled inside)
+                    
                     _ = Task.Run(() => HandleClientAsync(clientSocket, clientNum));
                 }
             }
@@ -291,7 +286,6 @@ namespace Server
             }
         }
 
-        // Report generation: prints requested statistics to console (cancellable)
         static async Task PrintClassesReportAsync(CancellationToken ct)
         {
             List<Clase> snapshot;
@@ -331,7 +325,6 @@ namespace Server
                 }
                 catch { }
 
-                // Simulate longer work granularity so cancellation can be observed on large sets
                 await Task.Yield();
             }
 
@@ -1245,7 +1238,6 @@ namespace Server
                 }
 
                 // Si el tiempo del webhook ya pasó pero la clase aún no comenzó, no enviar
-                // (esto puede pasar si el usuario se une muy cerca del inicio)
                 if (webhookTime <= now)
                 {
                     Console.WriteLine($"[DEBUG] The time to send the webhook for class {clase.Nombre} has already passed. Current time: {now:yyyy-MM-dd HH:mm:ss}, Webhook time: {webhookTime:yyyy-MM-dd HH:mm:ss}");
@@ -1264,10 +1256,8 @@ namespace Server
                     return;
                 }
 
-                // System.Threading.Timer tiene un límite máximo de aproximadamente 2^31-1 milisegundos
-                // Si el delay es muy grande, usar Task.Delay en su lugar
                 long delayMs = (long)delay.TotalMilliseconds;
-                const long maxTimerDelay = int.MaxValue - 1; // ~24.8 días
+                const long maxTimerDelay = int.MaxValue - 1; 
 
                 lock (timerLock)
                 {
@@ -1279,7 +1269,6 @@ namespace Server
 
                     if (delayMs > maxTimerDelay)
                     {
-                        // Delay muy grande, usar Task.Delay en lugar de Timer
                         Console.WriteLine($"[DEBUG] Delay too large ({delay.TotalDays:F2} days), using Task.Delay instead of Timer");
                         _ = Task.Run(async () =>
                         {
@@ -1295,11 +1284,9 @@ namespace Server
                     }
                     else
                     {
-                        // Delay normal, usar Timer
                         var timer = new System.Threading.Timer(_ =>
                         {
                             Console.WriteLine($"[DEBUG] Timer executed for class {clase.Nombre} (user: {userName})");
-                            // Ejecutar el webhook de forma asíncrona
                             _ = Task.Run(async () =>
                             {
                                 await CallWebhookAsync(webhookUrl, clase, userName);
@@ -1431,7 +1418,6 @@ namespace Server
             {
                 var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
                 
-                // Configurar Kestrel para aceptar HTTP/2 sin TLS
                 builder.WebHost.ConfigureKestrel(options =>
                 {
                     string grpcPort = Environment.GetEnvironmentVariable("GRPC_PORT") ?? "5002";

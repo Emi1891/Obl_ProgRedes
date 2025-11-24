@@ -44,14 +44,12 @@ namespace Cliente_de_Chat_
                 using var client = new ClientWebSocket();
                 await client.ConnectAsync(new Uri(chatServerUrl), CancellationToken.None);
 
-                // Enviar credenciales y link
                 var initialMessage = $"{link}|{username}|{password}";
                 var initialMessageBytes = Encoding.UTF8.GetBytes(initialMessage);
                 await client.SendAsync(new ArraySegment<byte>(initialMessageBytes), WebSocketMessageType.Text, true, CancellationToken.None);
 
                 Console.WriteLine("\nConectado al chat. Escriba mensajes (o 'exit' para salir):\n");
 
-                // Tarea para recibir mensajes
                 var receiveTask = Task.Run(async () =>
                 {
                     var buffer = new byte[1024 * 4];
@@ -78,7 +76,6 @@ namespace Cliente_de_Chat_
                     }
                 });
 
-                // Read messages from user and send them
                 while (client.State == WebSocketState.Open)
                 {
                     var input = Console.ReadLine();

@@ -36,10 +36,8 @@ namespace Servidor_de_Chat
             var builder = WebApplication.CreateBuilder(args);
             var app = builder.Build();
 
-            // Habilitar WebSockets
             app.UseWebSockets();
 
-            // WebSocket endpoint para chat
             app.Map("/chat", async (HttpContext context) =>
             {
                 if (!context.WebSockets.IsWebSocketRequest)
@@ -54,7 +52,6 @@ namespace Servidor_de_Chat
 
                 try
                 {
-                    // Recibir mensaje inicial con link y credenciales
                     var buffer = new byte[1024 * 4];
                     var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
 
@@ -68,7 +65,6 @@ namespace Servidor_de_Chat
                             username = parts[1];
                             string password = parts[2];
 
-                            // Validar credenciales y link
                             bool isValid = await ValidateUserAndLink(link, username, password);
                             if (!isValid)
                             {
@@ -76,7 +72,6 @@ namespace Servidor_de_Chat
                                 return;
                             }
 
-                            // Obtener nombre de clase del link
                             className = ExtractClassNameFromLink(link);
                             if (string.IsNullOrEmpty(className))
                             {
@@ -84,7 +79,6 @@ namespace Servidor_de_Chat
                                 return;
                             }
 
-                            // Agregar cliente a la sala
                             lock (roomsLock)
                             {
                                 if (!chatRooms.ContainsKey(className))
@@ -97,11 +91,9 @@ namespace Servidor_de_Chat
                                 }
                             }
 
-                            // Enviar mensaje de bienvenida
                             var welcomeMsg = $"[System] {username} joined the chat";
                             await BroadcastMessage(className, welcomeMsg, webSocket);
 
-                            // Escuchar mensajes
                             while (webSocket.State == WebSocketState.Open)
                             {
                                 try
@@ -133,7 +125,6 @@ namespace Servidor_de_Chat
                 }
                 finally
                 {
-                    // Remover cliente de la sala
                     if (!string.IsNullOrEmpty(className))
                     {
                         lock (roomsLock)
@@ -184,7 +175,6 @@ namespace Servidor_de_Chat
                 using var channel = Grpc.Net.Client.GrpcChannel.ForAddress(MainServerGrpcUrl);
                 var client = new Servidor_de_Chat.AuthService.AuthServiceClient(channel);
 
-                // Validar credenciales
                 var authRequest = new Servidor_de_Chat.ValidateRequest { Username = username, Password = password };
                 var authResponse = await client.ValidateCredentialsAsync(authRequest);
                 if (!authResponse.Valid)
@@ -193,7 +183,6 @@ namespace Servidor_de_Chat
                     return false;
                 }
 
-                // Validar link
                 var linkRequest = new Servidor_de_Chat.ClassLinkRequest { Link = link };
                 var linkResponse = await client.ValidateClassLinkAsync(linkRequest);
                 if (!linkResponse.Valid)
@@ -213,7 +202,6 @@ namespace Servidor_de_Chat
 
         static string ExtractClassNameFromLink(string link)
         {
-            // Extraer nombre de clase del link (ej: www.classlink.com/yoga -> yoga)
             var parts = link.Split('/');
             if (parts.Length > 0)
             {
