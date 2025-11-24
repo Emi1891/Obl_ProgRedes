@@ -66,6 +66,30 @@ namespace Server
             }
         }
 
+        public static bool WaitForConnection(int maxRetries = 5, int delayMs = 500)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                if (channel != null && channel.IsOpen)
+                {
+                    return true;
+                }
+                
+                Initialize();
+                if (channel != null && channel.IsOpen)
+                {
+                    return true;
+                }
+                
+                if (i < maxRetries - 1)
+                {
+                    System.Threading.Thread.Sleep(delayMs);
+                }
+            }
+            
+            return channel != null && channel.IsOpen;
+        }
+
         public static void Close()
         {
             try

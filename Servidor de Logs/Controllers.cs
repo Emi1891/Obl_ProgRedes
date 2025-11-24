@@ -10,11 +10,11 @@ namespace Servidor_de_Logs_
     {
         [HttpGet]
         public IActionResult GetLogs(
-            [FromQuery] string? usuario,
-            [FromQuery] string? clase,
-            [FromQuery] string? fechaDesde,
-            [FromQuery] string? fechaHasta,
-            [FromQuery] string? evento)
+            [FromQuery(Name = "user")] string? usuario,
+            [FromQuery(Name = "class")] string? clase,
+            [FromQuery(Name = "dateFrom")] string? fechaDesde,
+            [FromQuery(Name = "dateTo")] string? fechaHasta,
+            [FromQuery(Name = "event")] string? evento)
         {
             try
             {
@@ -30,11 +30,11 @@ namespace Servidor_de_Logs_
                 var filteredLogs = LogService.GetFilteredLogs(filter);
                 var logsFormatted = filteredLogs.Select(log => new
                 {
-                    log.Usuario,
-                    log.Clase,
-                    log.Evento,
-                    Fecha = log.Fecha.ToString("dd/MM/yyyy - HH:mm"),
-                    log.Detalles
+                    user = log.Usuario,
+                    @class = log.Clase,
+                    @event = log.Evento,
+                    date = log.Fecha.ToString("dd/MM/yyyy - HH:mm"),
+                    details = log.Detalles
                 }).ToList();
                 return Ok(logsFormatted);
             }
@@ -75,13 +75,13 @@ namespace Servidor_de_Logs_
                 description = "Available filters for the /logs endpoint",
                 filters = new[]
                 {
-                    new { name = "usuario", type = "string", description = "Filter by username (partial search, case-insensitive)" },
-                    new { name = "clase", type = "string", description = "Filter by class name (partial search, case-insensitive)" },
-                    new { name = "fechaDesde", type = "datetime", description = "Filter logs from this date (format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)" },
-                    new { name = "fechaHasta", type = "datetime", description = "Filter logs until this date (format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)" },
-                    new { name = "evento", type = "string", description = "Filter by event type (partial search, case-insensitive)" }
+                    new { name = "user", type = "string", description = "Filter by username (partial search, case-insensitive)" },
+                    new { name = "class", type = "string", description = "Filter by class name (partial search, case-insensitive)" },
+                    new { name = "dateFrom", type = "datetime", description = "Filter logs from this date (format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)" },
+                    new { name = "dateTo", type = "datetime", description = "Filter logs until this date (format: YYYY-MM-DD or YYYY-MM-DDTHH:mm:ss)" },
+                    new { name = "event", type = "string", description = "Filter by event type (partial search, case-insensitive)" }
                 },
-                example = "/logs?usuario=admin&clase=Yoga&fechaDesde=2024-01-01&evento=enrollment",
+                example = "/logs?user=admin&class=Yoga&dateFrom=2024-01-01&event=enrollment",
                 note = "All filters are optional and can be combined. Results are ordered by date descending."
             };
             return Ok(filterInfo);

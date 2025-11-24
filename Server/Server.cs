@@ -54,16 +54,85 @@ namespace Server
         static async Task Main(string[] args)
         {
             LogHelper.Initialize();
+            
+            // Esperar a que RabbitMQ esté disponible antes de enviar logs de inicialización
+            // Esto asegura que los logs de usuarios/clases por defecto se envíen correctamente
+            if (!LogHelper.WaitForConnection())
+            {
+                Console.WriteLine("Warning: Could not establish RabbitMQ connection. Default logs may not be sent.");
+            }
+            else
+            {
+                // Pequeño delay adicional para asegurar que el servidor de logs tenga tiempo de conectarse
+                await Task.Delay(1000);
+            }
 
             users.Add(new Usuario("1", "1"));
 
             var usuarioBase = users.First(u => u.nombre == "1");
             string today = DateTime.Now.ToString("dd/MM/yyyy");
+
+            // Crear clases por defecto
             classes.Add(new Clase("Yoga", "Clase de yoga para principiantes", 60, 20, usuarioBase, today, "09:00"));
             classes.Add(new Clase("Pilates", "Pilates nivel intermedio", 45, 15, usuarioBase, today, "10:00"));
-            classes.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "11:00"));
-            classes.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "12:00"));
-            classes.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "13:00"));
+            classes.Add(new Clase("Funcional", "Entrenamiento funcional", 50, 25, usuarioBase, today, "22:00"));
+            classes.Add(new Clase("Spinning", "Clase de spinning intensa", 40, 10, usuarioBase, today, "22:30"));
+            classes.Add(new Clase("Stretching", "Estiramientos y movilidad", 30, 12, usuarioBase, today, "23:00"));
+
+            // Crear 3 usuarios por defecto
+            var user1 = new Usuario("user1", "user1");
+            var user2 = new Usuario("user2", "user2");
+            var user3 = new Usuario("user3", "user3");
+            users.Add(user1);
+            users.Add(user2);
+            users.Add(user3);
+
+            // Generar logs de registro para los usuarios por defecto
+            LogHelper.SendLog("user1", "", "User registered", "New user registered: user1");
+            LogHelper.SendLog("user2", "", "User registered", "New user registered: user2");
+            LogHelper.SendLog("user3", "", "User registered", "New user registered: user3");
+
+            // Crear clases para los usuarios por defecto
+            // Clase compartida por los 3 usuarios
+            var sharedClassAll = new Clase("Shared Class All", "Class shared by all three users", 60, 10, user1, today, "14:00");
+            classes.Add(sharedClassAll);
+            LogHelper.SendLog("user1", "Shared Class All", "Class created", "User user1 created the class Shared Class All");
+            sharedClassAll.AgregarUsuario(user1);
+            LogHelper.SendLog("user1", "Shared Class All", "User enrolled in class", "User user1 enrolled in the class Shared Class All");
+            sharedClassAll.AgregarUsuario(user2);
+            LogHelper.SendLog("user2", "Shared Class All", "User enrolled in class", "User user2 enrolled in the class Shared Class All");
+            sharedClassAll.AgregarUsuario(user3);
+            LogHelper.SendLog("user3", "Shared Class All", "User enrolled in class", "User user3 enrolled in the class Shared Class All");
+
+            // Clase individual para user1
+            var individualClass1 = new Clase("Individual Class 1", "Individual class for user1", 45, 5, user1, today, "15:00");
+            classes.Add(individualClass1);
+            LogHelper.SendLog("user1", "Individual Class 1", "Class created", "User user1 created the class Individual Class 1");
+            individualClass1.AgregarUsuario(user1);
+            LogHelper.SendLog("user1", "Individual Class 1", "User enrolled in class", "User user1 enrolled in the class Individual Class 1");
+
+            // Clase individual para user2
+            var individualClass2 = new Clase("Individual Class 2", "Individual class for user2", 45, 5, user2, today, "16:00");
+            classes.Add(individualClass2);
+            LogHelper.SendLog("user2", "Individual Class 2", "Class created", "User user2 created the class Individual Class 2");
+            individualClass2.AgregarUsuario(user2);
+            LogHelper.SendLog("user2", "Individual Class 2", "User enrolled in class", "User user2 enrolled in the class Individual Class 2");
+
+            // Clase individual para user3
+            var individualClass3 = new Clase("Individual Class 3", "Individual class for user3", 45, 5, user3, today, "17:00");
+            classes.Add(individualClass3);
+            LogHelper.SendLog("user3", "Individual Class 3", "Class created", "User user3 created the class Individual Class 3");
+            individualClass3.AgregarUsuario(user3);
+            LogHelper.SendLog("user3", "Individual Class 3", "User enrolled in class", "User user3 enrolled in the class Individual Class 3");
+
+            // Clase compartida por user1 y user2
+            var sharedClass12 = new Clase("Shared Class 1-2", "Class shared by user1 and user2", 50, 8, user1, today, "18:00");
+            classes.Add(sharedClass12);
+            LogHelper.SendLog("user1", "Shared Class 1-2", "Class created", "User user1 created the class Shared Class 1-2");
+            sharedClass12.AgregarUsuario(user1);
+            LogHelper.SendLog("user1", "Shared Class 1-2", "User enrolled in class", "User user1 enrolled in the class Shared Class 1-2");
+            sharedClass12.AgregarUsuario(user2);
+            LogHelper.SendLog("user2", "Shared Class 1-2", "User enrolled in class", "User user2 enrolled in the class Shared Class 1-2");
 
             // Iniciar tarea para verificar webhooks
             _ = Task.Run(() => StartWebhookScheduler());
@@ -270,14 +339,14 @@ namespace Server
 
             double promedioTamImagen = imagenesEncontradas == 0 ? 0 : (double)tamañoTotalImagenes / imagenesEncontradas;
 
-            Console.WriteLine($"\n=== REPORT: Estadisticas de clases de hoy ({DateTime.Today:dd-MM-yyyy})===");
-            Console.WriteLine($"Cantidad de clases totales: {totalClases}");
-            Console.WriteLine($"Promedio de duración (minutos): {promedioDuracion:F2}");
-            Console.WriteLine($"Cantidad total de inscriptos: {totalInscriptos}");
-            Console.WriteLine($"Promedio de inscriptos por clase: {promedioInscriptos:F2}");
-            Console.WriteLine($"Cantidad de clases con imagen de portada: {cantidadClasesConImagen}");
-            Console.WriteLine($"Tamaño total de las imágenes de portada (bytes): {tamañoTotalImagenes}");
-            Console.WriteLine($"Promedio de tamaño de las imágenes de portada (bytes): {promedioTamImagen:F2}");
+            Console.WriteLine($"\n=== REPORT: Today's class statistics ({DateTime.Today:dd-MM-yyyy})===");
+            Console.WriteLine($"Total number of classes: {totalClases}");
+            Console.WriteLine($"Average duration (minutes): {promedioDuracion:F2}");
+            Console.WriteLine($"Total number of enrolled users: {totalInscriptos}");
+            Console.WriteLine($"Average enrolled users per class: {promedioInscriptos:F2}");
+            Console.WriteLine($"Number of classes with cover image: {cantidadClasesConImagen}");
+            Console.WriteLine($"Total size of cover images (bytes): {tamañoTotalImagenes}");
+            Console.WriteLine($"Average size of cover images (bytes): {promedioTamImagen:F2}");
             Console.WriteLine("===================================\n");
 
             await Task.CompletedTask.ConfigureAwait(false);
@@ -436,7 +505,7 @@ namespace Server
 
             if (added)
             {
-                LogHelper.SendLog(username, "", "Usuario registrado", $"Nuevo usuario registrado: {username}");
+                LogHelper.SendLog(username, "", "User registered", $"New user registered: {username}");
             }
 
             await networkDataHelper.SendAsync(BitConverter.GetBytes(added)).ConfigureAwait(false);
@@ -459,7 +528,7 @@ namespace Server
             if (validUser)
             {
                 Console.WriteLine($"User {username} logged in.");
-                LogHelper.SendLog(username, "", "Usuario inició sesión", $"Usuario {username} inició sesión");
+                LogHelper.SendLog(username, "", "User logged in", $"User {username} logged in");
             }
             return validUser;
         }
@@ -639,7 +708,7 @@ namespace Server
 
                 if (didJoin && joinedClass != null)
                 {
-                    LogHelper.SendLog(userName, className, "Usuario se inscribió a clase", $"Usuario {userName} se inscribió a la clase {className}");
+                    LogHelper.SendLog(userName, className, "User enrolled in class", $"User {userName} enrolled in the class {className}");
 
                     // Guardar webhook si se proporcionó
                     if (!string.IsNullOrWhiteSpace(webhookUrl))
@@ -730,7 +799,7 @@ namespace Server
 
                 await ndh.SendAsync(BitConverter.GetBytes(true)).ConfigureAwait(false);
                 Console.WriteLine($"User {userName} left class '{className}'.");
-                LogHelper.SendLog(userName, className, "Usuario abandonó clase", $"Usuario {userName} abandonó la clase {className}");
+                LogHelper.SendLog(userName, className, "User left class", $"User {userName} left the class {className}");
                 return true;
             }
             catch (Exception e)
@@ -871,7 +940,7 @@ namespace Server
                 created = true;
                 if (created)
                 {
-                    LogHelper.SendLog(user, name, "Clase creada", $"Usuario {user} creó la clase {name}");
+                    LogHelper.SendLog(user, name, "Class created", $"User {user} created the class {name}");
                 }
             }
             catch (Exception)
@@ -1140,7 +1209,7 @@ namespace Server
             try
             {
                 var now = DateTime.Now;
-                Console.WriteLine($"[DEBUG] ScheduleWebhook - Hora actual del servidor: {now:yyyy-MM-dd HH:mm:ss}");
+                Console.WriteLine($"[DEBUG] ScheduleWebhook - Current server time: {now:yyyy-MM-dd HH:mm:ss}");
                 
                 // Intentar parsear la hora en formato HH:mm o HH:MM
                 if (!TimeSpan.TryParse(clase.Hora, out var timeSpan))
@@ -1150,11 +1219,11 @@ namespace Server
                     if (parts.Length == 2 && int.TryParse(parts[0], out int hours) && int.TryParse(parts[1], out int minutes))
                     {
                         timeSpan = new TimeSpan(hours, minutes, 0);
-                        Console.WriteLine($"[DEBUG] Hora parseada manualmente: {timeSpan}");
+                        Console.WriteLine($"[DEBUG] Time parsed manually: {timeSpan}");
                     }
                     else
                     {
-                        Console.WriteLine($"[ERROR] No se pudo parsear la hora: {clase.Hora}");
+                        Console.WriteLine($"[ERROR] Could not parse time: {clase.Hora}");
                         return;
                     }
                 }
@@ -1162,16 +1231,16 @@ namespace Server
                 var classStartTime = clase.Fecha.Date.Add(timeSpan);
                 var webhookTime = classStartTime.AddMinutes(-1); // 1 minuto antes
 
-                Console.WriteLine($"[DEBUG] Clase: {clase.Nombre}, Fecha: {clase.Fecha:yyyy-MM-dd}, Hora: {clase.Hora}");
-                Console.WriteLine($"[DEBUG] TimeSpan parseado: {timeSpan}");
-                Console.WriteLine($"[DEBUG] Tiempo de inicio de clase: {classStartTime:yyyy-MM-dd HH:mm:ss}");
-                Console.WriteLine($"[DEBUG] Tiempo del webhook (1 min antes): {webhookTime:yyyy-MM-dd HH:mm:ss}");
+                Console.WriteLine($"[DEBUG] Class: {clase.Nombre}, Date: {clase.Fecha:yyyy-MM-dd}, Time: {clase.Hora}");
+                Console.WriteLine($"[DEBUG] Parsed TimeSpan: {timeSpan}");
+                Console.WriteLine($"[DEBUG] Class start time: {classStartTime:yyyy-MM-dd HH:mm:ss}");
+                Console.WriteLine($"[DEBUG] Webhook time (1 min before): {webhookTime:yyyy-MM-dd HH:mm:ss}");
 
                 // Solo enviar el webhook si la clase aún no ha comenzado
                 if (classStartTime <= now)
                 {
                     // La clase ya comenzó o ya pasó, no enviar webhook
-                    Console.WriteLine($"[DEBUG] La clase {clase.Nombre} ya comenzó o ya pasó. Hora actual: {now:yyyy-MM-dd HH:mm:ss}, Hora inicio: {classStartTime:yyyy-MM-dd HH:mm:ss}");
+                    Console.WriteLine($"[DEBUG] Class {clase.Nombre} has already started or passed. Current time: {now:yyyy-MM-dd HH:mm:ss}, Start time: {classStartTime:yyyy-MM-dd HH:mm:ss}");
                     return;
                 }
 
@@ -1179,19 +1248,19 @@ namespace Server
                 // (esto puede pasar si el usuario se une muy cerca del inicio)
                 if (webhookTime <= now)
                 {
-                    Console.WriteLine($"[DEBUG] El tiempo para enviar el webhook de la clase {clase.Nombre} ya pasó. Hora actual: {now:yyyy-MM-dd HH:mm:ss}, Hora webhook: {webhookTime:yyyy-MM-dd HH:mm:ss}");
+                    Console.WriteLine($"[DEBUG] The time to send the webhook for class {clase.Nombre} has already passed. Current time: {now:yyyy-MM-dd HH:mm:ss}, Webhook time: {webhookTime:yyyy-MM-dd HH:mm:ss}");
                     return;
                 }
 
                 var delay = webhookTime - now;
                 string timerKey = $"{userName}|{clase.Nombre}";
 
-                Console.WriteLine($"[DEBUG] Delay calculado: {delay.TotalSeconds:F2} segundos ({delay.TotalMinutes:F2} minutos)");
+                Console.WriteLine($"[DEBUG] Calculated delay: {delay.TotalSeconds:F2} seconds ({delay.TotalMinutes:F2} minutes)");
 
                 // Validar que el delay sea positivo
                 if (delay.TotalMilliseconds <= 0)
                 {
-                    Console.WriteLine($"[ERROR] Delay negativo o cero: {delay.TotalMilliseconds} ms. No se puede programar el webhook.");
+                    Console.WriteLine($"[ERROR] Negative or zero delay: {delay.TotalMilliseconds} ms. Cannot schedule webhook.");
                     return;
                 }
 
@@ -1205,22 +1274,22 @@ namespace Server
                     if (webhookTimers.TryGetValue(timerKey, out var existingTimer))
                     {
                         existingTimer?.Dispose();
-                        Console.WriteLine($"[DEBUG] Timer existente eliminado para {timerKey}");
+                        Console.WriteLine($"[DEBUG] Existing timer removed for {timerKey}");
                     }
 
                     if (delayMs > maxTimerDelay)
                     {
                         // Delay muy grande, usar Task.Delay en lugar de Timer
-                        Console.WriteLine($"[DEBUG] Delay muy grande ({delay.TotalDays:F2} días), usando Task.Delay en lugar de Timer");
+                        Console.WriteLine($"[DEBUG] Delay too large ({delay.TotalDays:F2} days), using Task.Delay instead of Timer");
                         _ = Task.Run(async () =>
                         {
                             await Task.Delay(delay);
-                            Console.WriteLine($"[DEBUG] Task.Delay completado para clase {clase.Nombre} (usuario: {userName})");
+                            Console.WriteLine($"[DEBUG] Task.Delay completed for class {clase.Nombre} (user: {userName})");
                             await CallWebhookAsync(webhookUrl, clase, userName);
                             lock (timerLock)
                             {
                                 webhookTimers.Remove(timerKey);
-                                Console.WriteLine($"[DEBUG] Timer removido de la lista para {timerKey}");
+                                Console.WriteLine($"[DEBUG] Timer removed from list for {timerKey}");
                             }
                         });
                     }
@@ -1229,7 +1298,7 @@ namespace Server
                         // Delay normal, usar Timer
                         var timer = new System.Threading.Timer(_ =>
                         {
-                            Console.WriteLine($"[DEBUG] Timer ejecutado para clase {clase.Nombre} (usuario: {userName})");
+                            Console.WriteLine($"[DEBUG] Timer executed for class {clase.Nombre} (user: {userName})");
                             // Ejecutar el webhook de forma asíncrona
                             _ = Task.Run(async () =>
                             {
@@ -1237,19 +1306,19 @@ namespace Server
                                 lock (timerLock)
                                 {
                                     webhookTimers.Remove(timerKey);
-                                    Console.WriteLine($"[DEBUG] Timer removido de la lista para {timerKey}");
+                                    Console.WriteLine($"[DEBUG] Timer removed from list for {timerKey}");
                                 }
                             });
                         }, null, TimeSpan.FromMilliseconds(delayMs), Timeout.InfiniteTimeSpan);
 
                         webhookTimers[timerKey] = timer;
-                        Console.WriteLine($"[DEBUG] Webhook programado para {webhookTime:yyyy-MM-dd HH:mm:ss} para clase {clase.Nombre} (usuario: {userName}, delay: {delay.TotalMinutes:F2} minutos, {delay.TotalSeconds:F2} segundos, {delayMs} ms)");
+                        Console.WriteLine($"[DEBUG] Webhook scheduled for {webhookTime:yyyy-MM-dd HH:mm:ss} for class {clase.Nombre} (user: {userName}, delay: {delay.TotalMinutes:F2} minutes, {delay.TotalSeconds:F2} seconds, {delayMs} ms)");
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ERROR] Error programando webhook: {ex.Message}");
+                Console.WriteLine($"[ERROR] Error scheduling webhook: {ex.Message}");
                 Console.WriteLine($"[ERROR] Stack trace: {ex.StackTrace}");
             }
         }
@@ -1261,25 +1330,25 @@ namespace Server
                 using var httpClient = new System.Net.Http.HttpClient();
                 var payload = new
                 {
-                    message = $"Te has inscrito exitosamente a la clase '{clase.Nombre}'",
-                    clase = clase.Nombre,
-                    usuario = userName,
-                    fecha = clase.Fecha.ToString("yyyy-MM-dd"),
-                    hora = clase.Hora,
+                    message = $"You have successfully enrolled in the class '{clase.Nombre}'",
+                    @class = clase.Nombre,
+                    user = userName,
+                    date = clase.Fecha.ToString("dd/MM/yyyy"),
+                    time = clase.Hora,
                     link = clase.Link,
-                    tipo = "inscripcion"
+                    type = "enrollment"
                 };
 
                 var json = System.Text.Json.JsonSerializer.Serialize(payload);
                 var content = new System.Net.Http.StringContent(json, Encoding.UTF8, "application/json");
 
                 var response = await httpClient.PostAsync(webhookUrl, content);
-                Console.WriteLine($"Webhook de inscripción enviado para clase {clase.Nombre} (usuario: {userName}). Status: {response.StatusCode}");
-                LogHelper.SendLog(userName, clase.Nombre, "Webhook de inscripción enviado", $"Webhook de inscripción enviado para clase {clase.Nombre}");
+                Console.WriteLine($"Enrollment webhook sent for class {clase.Nombre} (user: {userName}). Status: {response.StatusCode}");
+                LogHelper.SendLog(userName, clase.Nombre, "Enrollment webhook sent", $"Enrollment webhook sent for class {clase.Nombre}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error llamando webhook de inscripción: {ex.Message}");
+                Console.WriteLine($"Error calling enrollment webhook: {ex.Message}");
             }
         }
 
@@ -1290,25 +1359,25 @@ namespace Server
                 using var httpClient = new System.Net.Http.HttpClient();
                 var payload = new
                 {
-                    message = $"La clase '{clase.Nombre}' comenzará en 1 minuto",
-                    clase = clase.Nombre,
-                    usuario = userName,
-                    fecha = clase.Fecha.ToString("yyyy-MM-dd"),
-                    hora = clase.Hora,
+                    message = $"The class '{clase.Nombre}' will start in 1 minute",
+                    @class = clase.Nombre,
+                    user = userName,
+                    date = clase.Fecha.ToString("dd/MM/yyyy"),
+                    time = clase.Hora,
                     link = clase.Link,
-                    tipo = "alerta"
+                    type = "alert"
                 };
 
                 var json = System.Text.Json.JsonSerializer.Serialize(payload);
                 var content = new System.Net.Http.StringContent(json, Encoding.UTF8, "application/json");
 
                 var response = await httpClient.PostAsync(webhookUrl, content);
-                Console.WriteLine($"Webhook de alerta enviado para clase {clase.Nombre} (usuario: {userName}). Status: {response.StatusCode}");
-                LogHelper.SendLog(userName, clase.Nombre, "Webhook de alerta enviado", $"Webhook de alerta enviado para clase {clase.Nombre}");
+                Console.WriteLine($"Alert webhook sent for class {clase.Nombre} (user: {userName}). Status: {response.StatusCode}");
+                LogHelper.SendLog(userName, clase.Nombre, "Alert webhook sent", $"Alert webhook sent for class {clase.Nombre}");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error llamando webhook de alerta: {ex.Message}");
+                Console.WriteLine($"Error calling alert webhook: {ex.Message}");
             }
         }
 
@@ -1351,7 +1420,7 @@ namespace Server
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"Error en webhook scheduler: {ex.Message}");
+                    Console.WriteLine($"Error in webhook scheduler: {ex.Message}");
                 }
             }
         }
